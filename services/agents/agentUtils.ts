@@ -1,5 +1,4 @@
 import { ConversationContext } from './router';
-import { extractJsonFromResponse } from './agentUtils'; // We'll add this function here
 
 // --- The Expanded Universal Agent Response Protocol (UARP) ---
 export type AgentResponse = {
@@ -27,11 +26,11 @@ export type Action =
   | { type: "COMPLETE_GOAL" } // The main goal is finished. The conversation can start fresh.
   | { type: "REQUEST_USER_INPUT" } // The UI is interactive; wait for user submission.
   | { 
-      type: "DELEGATE"; // NEW: Hand off a single task to a specialist agent.
+      type: "DELEGATE"; // Hand off a single task to a specialist agent.
       payload: { agent: string; prompt: string; };
     }
   | { 
-      type: "DELEGATE_PARALLEL"; // NEW: Hand off multiple tasks to run simultaneously.
+      type: "DELEGATE_PARALLEL"; // Hand off multiple tasks to run simultaneously.
       payload: { agent: string; prompt: string; }[];
     }
   | { type: "SAVE_CREDENTIALS"; payload: any; } // For the onboarding agent.
