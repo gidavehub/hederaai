@@ -9,7 +9,6 @@ export default class GeneralAgent implements IAgent {
   public async execute(prompt: string, context: ConversationContext): Promise<AgentResponse> {
     console.log('[GeneralAgent] Executing...');
 
-    // This logic remains correct: Plan if there are no results, otherwise Synthesize.
     if (context.collected_info.specialist_results) {
       console.log('[GeneralAgent] Detected specialist results. Entering synthesis mode.');
       return this.synthesize(prompt, context);
@@ -30,7 +29,6 @@ export default class GeneralAgent implements IAgent {
         .map(([key, value]) => `- ${key}: ${value.description}`)
         .join('\n');
 
-      // *** CRITICAL FIX: The prompt is now much more robust and context-aware. ***
       const llmPrompt = `
         You are "Hedera AI", a master AI orchestrator for the Hedera network. Your primary function is to understand a user's request, check your existing knowledge, and create a precise execution plan.
 
@@ -41,19 +39,22 @@ export default class GeneralAgent implements IAgent {
 
         **Your Thought Process (Follow these steps strictly):**
         1.  **Analyze the User's Goal:** What does the user want to achieve with their latest prompt?
-        2.  **Check Your Knowledge FIRST:** Look at your "Current Knowledge" above. Do you already have the information needed to fulfill the request? For example, if the user asks for their balance, check if you have their 'User AccountID'.
-        3.  **Consult Your Tools:** Based on the user's goal and your existing knowledge, look at the "Available Specialist Agents" list. Decide which tool, if any, is required.
+        2.  **Check Your Knowledge FIRST:** Look at your "Current Knowledge" above. Do you already have the information needed to fulfill the request?
+        3.  **Consult Your Tools:** Based on the user's goal, look at the "Available Specialist Agents" list. Decide which tool, if any, is required.
         4.  **Formulate a Plan:**
-            -   **If a tool is needed AND you have the prerequisites** (e.g., you need 'wallet/balanceAgent' and you have the 'User AccountID'), your plan is to delegate. The action type will be 'DELEGATE' or 'DELEGATE_PARALLEL'.
-            -   **If a tool is needed BUT you LACK prerequisites** (e.g., the user wants their history but 'User AccountID' is 'Not available'), your plan is to delegate to 'utility/onboardingAgent' to collect the missing info. THIS IS A LAST RESORT.
-            -   **If NO tools are needed** (e.g., for greetings like "how are you", or questions you can answer directly), your plan is to respond immediately. The action type will be 'COMPLETE_GOAL'.
+            -   **If a tool is needed AND you have the prerequisites**, your plan is to delegate. The action type will be 'DELEGATE'. The UI should be a 'LOADING' type.
+            -   **If a tool is needed BUT you LACK prerequisites**, your plan is to delegate to 'utility/onboardingAgent' to collect the missing info. THIS IS A LAST RESORT.
+            -   **If NO tools are needed** (e.g., for greetings like "how are you", or simple questions), your plan is to respond immediately. The action type will be 'COMPLETE_GOAL', and the UI can be a simple 'TEXT' component.
 
         **Your Response MUST be a valid UARP JSON object only.**
 
         **UARP Schema for Planning:**
         {
-          "speech": "A brief, conversational message to the user indicating you've understood and are starting to work.",
-          "ui": { "type": "LOADING", "props": { "text": "Processing..." } },
+          "speech": "A brief, conversational message to the user indicating you've understood and are starting to work, OR the direct answer if no tool is needed.",
+          "ui": { 
+            "type": "'LOADING' | 'TEXT'", 
+            "props": { "text": "..." } 
+          },
           "action": {
             "type": "'COMPLETE_GOAL' | 'DELEGATE' | 'DELEGATE_PARALLEL'",
             "payload": "(Required for DELEGATE actions) An object or array of objects: { agent: string, prompt: string }"
@@ -63,13 +64,11 @@ export default class GeneralAgent implements IAgent {
         **Available Specialist Agents (Your Tools):**
         ${specialistAgents}
         
-        **CRITICAL RULE:** Do NOT delegate to 'utility/onboardingAgent' if you already have the 'User AccountID'.
-
         ---
         **User's Request:** "${prompt}"
         ---
 
-        Now, generate the UARP JSON plan based on your rigorous thought process.
+        Now, generate the UARP JSON plan.
       `;
 
       const result = await geminiModel.generateContent(llmPrompt);
@@ -84,7 +83,7 @@ export default class GeneralAgent implements IAgent {
         action: responseJson.action,
         context: {
           ...context,
-          status: 'delegating', // Set status to delegating if a plan is made
+          status: 'delegating',
           history: [...context.history, `GeneralAgent created a plan: ${responseJson.action.type}`],
         },
       };
@@ -96,30 +95,39 @@ export default class GeneralAgent implements IAgent {
   }
 
   /**
-   * PHASE 2: SYNTHESIS (No changes needed here, logic is sound)
-   * The agent receives the results and weaves them into a coherent response.
+   * PHASE 2: SYNTHESIS
+   * The agent receives the results and intelligently designs a UI to present them.
    */
   private async synthesize(prompt: string, context: ConversationContext): Promise<AgentResponse> {
     try {
         const specialistResults = context.collected_info.specialist_results;
   
+        // *** THIS IS THE CRITICAL UPGRADE FOR THE AGENT'S "BRAIN" ***
         const llmPrompt = `
-          You are "Hedera AI", a master AI synthesizer. Your specialist agents have completed their tasks and returned raw data. Your job is to transform this data into a single, coherent, and friendly response for the user.
-  
+          You are "Hedera AI", a master AI synthesizer and UI designer. Your specialist agents have completed their tasks and returned raw data. Your job is to transform this data into a single, coherent, friendly, and visually rich response for the user.
+
+          **Your UI Design Palette (The tools you MUST use to build the UI):**
+          - **'LAYOUT_STACK'**: Use this as the main container when you need to show multiple UI components at once. 'props.children' will be an array of other UI components.
+          - **'TEXT'**: For paragraphs of text, explanations, or summaries. Use 'props.title' and 'props.text'.
+          - **'KEY_VALUE_DISPLAY'**: PERFECT for showing structured data. Use for account balances, transaction details, token info, etc. 'props.items' is an array of {key: string, value: string}.
+          - **'DATA_TABLE'**: Use this for lists of similar items, especially transaction history. 'props.headers' is an array of strings. 'props.rows' is an array of arrays.
+          - **'CHART'**: Use to visualize data. 'props.type' can be 'BAR' or 'LINE'. 'props.data' is an array of objects.
+          
           **Your Thought Process:**
           1.  **Review the Original Goal:** The user's initial request was: "${context.collected_info.originalPrompt}".
-          2.  **Analyze the Data:** Examine the JSON data returned by your specialist agents. Note any successes or errors.
-          3.  **Craft the Narrative:** Formulate a conversational "speech" that summarizes all the findings. If there was an error, explain it kindly.
-          4.  **Design the UI:** Combine the UI components from the specialist results into a single, rich UI. Use a "LAYOUT_STACK".
-  
+          2.  **Analyze the Data:** Examine the JSON data from the specialists. Understand what information you have.
+          3.  **Select the Right UI Tools:** Based on the data's structure, choose the BEST components from your "UI Design Palette". For example, if you have a list of transactions, use a 'DATA_TABLE', not just 'TEXT'. If you have an account balance, use 'KEY_VALUE_DISPLAY'.
+          4.  **Craft the Narrative:** Formulate a conversational "speech" that summarizes the findings.
+          5.  **Construct the Final UI JSON:** Build the 'ui' object using your chosen components, likely nested within a 'LAYOUT_STACK'.
+
           **Your Response MUST be a valid UARP JSON object only.**
-  
+
           ---
           **Data from Specialist Agents:**
           ${JSON.stringify(specialistResults, null, 2)}
           ---
-  
-          Now, generate the final UARP JSON response for the user.
+
+          Now, analyze the data, select the best UI components from your palette, and generate the final UARP JSON response.
         `;
   
         const result = await geminiModel.generateContent(llmPrompt);
