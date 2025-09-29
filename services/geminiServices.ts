@@ -1,5 +1,8 @@
+// /services/geminiServices.ts
+
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { routeRequest, ConversationContext } from './agents/router';
+import { routeRequest } from './agents/router';
+import type { ConversationContext } from './agents/agentUtils';
 
 // Validate that the Gemini API key is set in the environment variables.
 if (!process.env.GEMINI_API_KEY) {
@@ -11,6 +14,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // Export the model instance so that individual agents (like GeneralAgent, BalanceAgent)
 // can use it for their specific LLM-powered tasks.
+// Using a slightly more capable model is good for the complex reasoning of the GeneralAgent.
 export const geminiModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
 /**
@@ -36,7 +40,7 @@ export async function processUserPrompt(
     return agentSystemResponse;
   } catch (error) {
     console.error("[GeminiServices] A critical, unhandled error occurred in the agent system:", error);
-    
+
     // This is the final safety net. If the router or an agent throws an unexpected
     // error that isn't caught, this will prevent the server from crashing and
     // will return a structured error message to the user.
@@ -45,7 +49,7 @@ export async function processUserPrompt(
       speech: "Oh dear, something went very wrong deep in my circuits. We might need to start over.",
       ui: {
         type: 'TEXT',
-        props: { 
+        props: {
           title: "Critical System Error",
           text: "A critical and unexpected error occurred. Please try again later."
         }

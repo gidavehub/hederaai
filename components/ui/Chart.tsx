@@ -15,70 +15,92 @@ import {
   CartesianGrid,
 } from 'recharts';
 
-// A more specific type for chart data for better type safety
 type ChartDataPoint = {
   name: string;
   [key: string]: any;
 };
 
 interface ChartProps {
-  type: 'BAR' | 'LINE' | string; // Allow for other types, but define common ones
+  type: 'BAR' | 'LINE' | string;
   data: ChartDataPoint[];
-  dataKey: string; // The key in the data objects to plot on the Y-axis
+  dataKey: string;
   title?: string;
 }
 
 export const Chart = ({ type, data, dataKey, title }: ChartProps) => {
+  // Common JS style objects for Recharts props
+  const gridProps = { strokeDasharray: "3 3", stroke: "rgba(0, 0, 0, 0.1)" };
+  const axisProps = { stroke: "#64748b" /* slate-500 */, tick: { fontSize: 12 } };
+  const tooltipProps = {
+    contentStyle: {
+      backgroundColor: "rgba(255, 255, 255, 0.8)",
+      backdropFilter: 'blur(10px)',
+      border: '1px solid rgba(0, 0, 0, 0.1)',
+      borderRadius: '0.75rem',
+      boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+    },
+    labelStyle: { color: '#1e293b' /* slate-800 */ },
+  };
+  const legendProps = { wrapperStyle: { color: '#334155' /* slate-700 */, fontSize: 14 } };
+
+  const styles = `
+    .chart-wrapper {
+      width: 100%;
+      height: 300px;
+    }
+    .unsupported-chart-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+    }
+    .unsupported-chart-text {
+      color: #64748b; /* text-slate-500 */
+      font-style: italic;
+    }
+  `;
+
   const renderChart = () => {
     switch (type) {
       case 'BAR':
         return (
-          <BarChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.1)" />
-            <XAxis dataKey="name" stroke="#888888" />
-            <YAxis stroke="#888888" />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: 'rgba(30, 41, 59, 0.9)',
-                borderColor: 'rgba(255, 255, 255, 0.2)',
-              }}
-              labelStyle={{ color: '#dddddd' }}
-            />
-            <Legend wrapperStyle={{ color: '#dddddd' }} />
-            <Bar dataKey={dataKey} fill="#8884d8" />
+          <BarChart data={data} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+            <CartesianGrid {...gridProps} />
+            <XAxis dataKey="name" {...axisProps} />
+            <YAxis {...axisProps} />
+            <Tooltip {...tooltipProps} />
+            <Legend {...legendProps} />
+            <Bar dataKey={dataKey} fill="rgba(59, 130, 246, 0.7)" />
           </BarChart>
         );
       case 'LINE':
         return (
-          <LineChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.1)" />
-            <XAxis dataKey="name" stroke="#888888" />
-            <YAxis stroke="#888888" />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: 'rgba(30, 41, 59, 0.9)',
-                borderColor: 'rgba(255, 255, 255, 0.2)',
-              }}
-              labelStyle={{ color: '#dddddd' }}
-            />
-            <Legend />
-            <Line type="monotone" dataKey={dataKey} stroke="#82ca9d" />
+          <LineChart data={data} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+            <CartesianGrid {...gridProps} />
+            <XAxis dataKey="name" {...axisProps} />
+            <YAxis {...axisProps} />
+            <Tooltip {...tooltipProps} />
+            <Legend {...legendProps} />
+            <Line type="monotone" dataKey={dataKey} stroke="#8b5cf6" strokeWidth={2} />
           </LineChart>
         );
       default:
         return (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-gray-400 italic">Chart type '{type}' is not supported.</p>
+          <div className="unsupported-chart-container">
+            <p className="unsupported-chart-text">Chart type '{type}' is not supported.</p>
           </div>
         );
     }
   };
 
   return (
-    <Card title={title || `Chart: ${type}`}>
-      <div style={{ width: '100%', height: 300 }}>
-        <ResponsiveContainer>{renderChart()}</ResponsiveContainer>
-      </div>
-    </Card>
+    <>
+      <style>{styles}</style>
+      <Card title={title || `Chart: ${type}`}>
+        <div className="chart-wrapper">
+          <ResponsiveContainer>{renderChart()}</ResponsiveContainer>
+        </div>
+      </Card>
+    </>
   );
 };

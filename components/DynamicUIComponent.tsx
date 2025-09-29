@@ -1,4 +1,3 @@
-// /components/DynamicUIComponent.tsx
 'use client';
 
 import { ChangeEvent } from 'react';
@@ -11,6 +10,7 @@ import { TextInput } from './ui/TextInput';
 import { TextDisplay } from './ui/TextDisplay';
 import { Button } from './ui/Button';
 import { Chart } from './ui/Chart';
+import { LoadingIndicator } from './ui/LoadingIndicator'; // <-- 1. IMPORT THE NEW COMPONENT
 
 // This interface defines the state that will be shared between
 // the main page's AuroraInputBar and any INPUT component in the UI.
@@ -97,6 +97,12 @@ export const DynamicUIComponent = ({ uiData, onSubmit, sharedInputState }: Dynam
     case 'CHART':
        // This renders a placeholder, demonstrating extensibility.
       return <Chart {...props} />;
+
+    // --- vvvvvv THE FIX IS HERE vvvvvv ---
+    case 'LOADING':
+      // The LOADING component displays an animation and optional text.
+      return <LoadingIndicator {...props} />;
+    // --- ^^^^^^ THE FIX IS HERE ^^^^^^ ---
 
     default:
       // This is a crucial fallback for development. If the AI generates a new

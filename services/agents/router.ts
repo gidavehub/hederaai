@@ -1,131 +1,124 @@
-import { callAgent } from './agentUtils';
-import { AGENT_REGISTRY } from './registry';
-import { geminiModel } from '../geminiServices';
+// /services/agents/router.ts
 
-// The structure of our conversation's memory
-export type ConversationContext = {
-  // A machine-readable goal, e.g., "get_balance" or "complex_query"
-  goal: string; 
-  // The current state of that goal
-  status: 'pending' | 'awaiting_user_input' | 'delegating' | 'complete' | 'failed';
-  // Information we've gathered from the user
-  collected_info: { [key: string]: any };
-  // A stack of agents working on the current goal. The last one is the active one.
-  call_stack: string[];
-  // A human-readable history of events in the conversation
-  history: string[];
-};
+import { callAgent, AgentResponse } from './agentUtils';
 
 /**
  * The main entry point for routing all user requests.
- * It acts as a high-speed triage unit, deciding which agent should handle the prompt.
+ *
+ * REFINED ARCHITECTURE V2:
+ * 1. Gatekeeper: Handles onboarding and multi-turn conversations in progress.
+ * 2. Mandatory Delegation to GeneralAgent: All new prompts are ALWAYS sent to the GeneralAgent for planning.
+ * 3. Execution Loop: The Router acts as an executor for the GeneralAgent's plans.
+ * 4. Synthesis Loop: Results are sent BACK to the GeneralAgent for synthesis.
  */
-export async function routeRequest(prompt: string, context: ConversationContext | null) {
-  // --- 1. GATEKEEPER LOGIC: Check for Authentication ---
-  // If there's no context or no accountId, the user MUST be onboarded.
+
+export type ConversationContext = {
+  goal: string | null;
+  status: 'pending' | 'awaiting_user_input' | 'delegating' | 'complete' | 'failed';
+  collected_info: { [key: string]: any };
+  call_stack: string[];
+  history: string[];
+};
+
+
+export async function routeRequest(prompt: string, context: ConversationContext | null): Promise<AgentResponse> {
+  // --- 1. GATEKEEPER & CONTINUITY LOGIC ---
+
   if (!context || !context.collected_info.accountId) {
-    console.log('[Router] Gatekeeper: User not authenticated. Forcing onboarding.');
-    
-    // If onboarding is already in progress, continue it.
-    if (context && context.goal === 'onboarding') {
-      return callAgent('utility/onboardingAgent', prompt, context);
+    console.log('[Router] New user detected. Forcing onboarding.');
+    // We haven't created onboardingAgent yet, so return a placeholder. This avoids the crash.
+    // In a real scenario, this would call the actual agent.
+    if (!prompt) { // Initial load before user has typed anything
+      const onboardingContext = initializeContext('utility/onboardingAgent', "Begin Onboarding");
+      return callAgent('utility/onboardingAgent', "Begin Onboarding", onboardingContext);
     }
-    
-    // Otherwise, start a brand new onboarding session.
-    const onboardingContext = initializeContext('utility/onboardingAgent', prompt);
-    // We pass an empty prompt to the agent on its first run to let it ask the first question.
-    return callAgent('utility/onboardingAgent', '', onboardingContext); 
+    // If a logged-out user types something, the GeneralAgent should handle it.
+    // We will let it fall through for now, assuming login is handled on the frontend.
   }
 
-  // --- 2. CONTINUITY LOGIC: Handle Ongoing Multi-Step Goals ---
-  // If a previous turn left the system waiting for the user, we don't need to re-classify.
-  // We continue with the agent that was already working.
-  if (context.status === 'awaiting_user_input' || context.status === 'pending') {
-    console.log(`[Router] Continuing conversation. Goal: ${context.goal}, Status: ${context.status}`);
+  if (context && context.status === 'awaiting_user_input') {
+    console.log('[Router] Continuing an existing multi-turn interaction.');
     const activeAgentName = context.call_stack[context.call_stack.length - 1];
     return callAgent(activeAgentName, prompt, context);
   }
 
-  // --- 3. AI TRIAGE LOGIC: Classify New, Standalone Requests ---
-  // The previous goal is complete, so this is a new request.
-  console.log('[Router] Previous goal complete. Using AI to classify new intent.');
-  const targetAgentName = await classifyIntentWithAI(prompt);
+  // --- 2. NEW REQUEST: ALWAYS DELEGATE TO GENERAL AGENT FOR PLANNING ---
 
-  console.log(`[Router] AI classified intent to: ${targetAgentName}`);
-  const newContext = initializeContext(targetAgentName, prompt, context.collected_info);
+  console.log('[Router] New request. Passing to GeneralAgent for planning.');
   
-  return callAgent(targetAgentName, prompt, newContext);
-}
+  // *** CRITICAL FIX: Sanitize the context before starting a new plan. ***
+  const planContext = initializeContext('general/generalAgent', prompt, context.collected_info);
+  
+  const planResponse = await callAgent('general/generalAgent', prompt, planContext);
 
-/**
- * Uses an LLM to classify the user's intent and select the appropriate agent.
- * @param prompt The user's request.
- * @returns The name of the agent best suited to handle the request.
- */
-async function classifyIntentWithAI(prompt: string): Promise<string> {
-  // Filter the registry to only include specialist "tools" the LLM can choose from.
-  const specialistAgents = Object.entries(AGENT_REGISTRY)
-    .filter(([key]) => key !== 'general/generalAgent' && key !== 'utility/unknownAgent')
-    .map(([key, value]) => `- ${key}: ${value.description}`)
-    .join('\n');
+  // --- 3. EXECUTION & SYNTHESIS LOGIC (Delegation Logic) ---
 
-  const classificationPrompt = `
-    You are an expert AI request router for a Hedera Hashgraph wallet assistant.
-    Your task is to analyze the user's prompt and determine the single best agent to handle it initially.
+  const actionType = planResponse.action?.type;
 
-    You have two choices:
-    1. A specific specialist agent if the prompt is a direct, simple command.
-    2. The 'general/generalAgent' if the prompt is conversational, complex, multi-part, ambiguous, or a question.
-
-    **RULE: If in doubt, always choose 'general/generalAgent'. It is the main brain.**
-
-    Here are the available specialist agents:
-    ${specialistAgents}
-
-    Analyze the following user prompt and respond with ONLY the name of the chosen agent. Do not provide any explanation or other text.
-
-    User Prompt: "${prompt}"
-  `;
-
-  try {
-    const result = await geminiModel.generateContent(classificationPrompt);
-    const agentName = result.response.text().trim();
+  if (actionType === 'DELEGATE' || actionType === 'DELEGATE_PARALLEL') {
+    console.log(`[Router] GeneralAgent planned a ${actionType} action. Executing tasks.`);
     
-    // Validate the LLM's response to ensure it's a real agent
-    if (AGENT_REGISTRY[agentName]) {
-      return agentName;
+    const tasks = actionType === 'DELEGATE' 
+      ? [planResponse.action.payload] 
+      : planResponse.action.payload;
+
+    if (!tasks || tasks.length === 0) {
+        console.error("[Router] DELEGATE action received with no tasks. Completing goal.");
+        return { ...planResponse, action: { type: 'COMPLETE_GOAL' }};
     }
-    console.warn(`[Router] LLM returned an invalid agent name: "${agentName}". Defaulting to generalAgent.`);
-    return 'general/generalAgent'; // Fallback to the main brain
-  } catch (error) {
-    console.error('[Router] Error during AI classification:', error);
-    return 'general/generalAgent'; // If classification fails, the GeneralAgent must handle it.
+
+    const specialistPromises = tasks.map((task: any) =>
+      callAgent(task.agent, task.prompt, planResponse.context)
+    );
+    const specialistResults = await Promise.all(specialistPromises);
+
+    const synthesisContext: ConversationContext = {
+      ...planResponse.context,
+      status: 'pending',
+      collected_info: {
+        ...planResponse.context.collected_info,
+        specialist_results: specialistResults, // Pass the full results, including any errors
+      },
+      history: [...planResponse.context.history, 'All specialist tasks completed. Preparing for synthesis.'],
+    };
+
+    console.log('[Router] All specialists finished. Calling GeneralAgent for synthesis.');
+    return await callAgent('general/generalAgent', prompt, synthesisContext);
   }
+
+  // If the action is not a delegation, return the GeneralAgent's direct response.
+  console.log('[Router] GeneralAgent handled request directly. Returning its response.');
+  return planResponse;
 }
 
+
 /**
- * Creates a new, clean conversation context for a new goal.
- * @param agentName The name of the agent that will handle the goal.
- * @param prompt The user's prompt that initiated the goal.
- * @param existingInfo Previously collected user info (like name, accountId) to carry over.
- * @returns A fully formed ConversationContext object.
+ * **CONTEXT SANITIZER**
+ * Creates a new, clean conversation context for the start of a request flow.
+ * It purposefully ONLY carries over essential, long-term user information.
  */
 function initializeContext(
   agentName: string,
   prompt: string,
-  existingInfo: { [key: string]: any } = {}
+  existingInfo: { [key:string]: any } = {}
 ): ConversationContext {
-  const goal = agentName.split('/')[1].replace('Agent', ''); // e.g., "balance" or "general"
-
-  const context: ConversationContext = {
-    goal: goal,
-    status: 'pending',
-    // We start with no collected info specific to this goal, but carry over user identity
-    collected_info: { ...existingInfo, originalPrompt: prompt },
-    call_stack: [agentName],
-    history: [`User initiated goal: "${goal}" with prompt: "${prompt}"`],
+  
+  // This is the sanitization step. We create a new object with only the keys we want to preserve.
+  const preservedInfo = {
+    name: existingInfo.name,
+    accountId: existingInfo.accountId,
+    long_term_memory: existingInfo.long_term_memory,
+    // CRITICAL: We explicitly DO NOT copy keys like 'specialist_results' or 'originalPrompt' from the previous turn.
   };
 
-  console.log('[Router] Initialized new context:', context);
+  const context: ConversationContext = {
+    goal: agentName.split('/')[1].replace('Agent', ''),
+    status: 'pending',
+    collected_info: { ...preservedInfo, originalPrompt: prompt }, // Add the new originalPrompt
+    call_stack: [agentName],
+    history: [`User initiated goal with prompt: "${prompt}"`],
+  };
+
+  console.log('[Router] Initialized new SANITIZED context:', context);
   return context;
 }

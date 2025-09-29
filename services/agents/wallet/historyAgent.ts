@@ -1,3 +1,5 @@
+// /services/agents/wallet/historyAgent.ts
+
 import { IAgent, AgentResponse, extractJsonFromResponse } from '../agentUtils';
 import { ConversationContext } from '../router';
 import { geminiModel } from '../../geminiServices';
@@ -6,12 +8,13 @@ import { geminiModel } from '../../geminiServices';
 const MIRROR_NODE_URL = 'https://testnet.mirrornode.hedera.com';
 
 type TransactionData = {
-  transaction_id: string;
-  name: string;
-  result: string;
-  consensus_timestamp: string;
-  transfers: { account: string; amount: number; is_approval: boolean }[];
+    transaction_id: string;
+    name: string;
+    result: string;
+    consensus_timestamp: string;
+    transfers: { account: string; amount: number; is_approval: boolean }[];
 }[];
+
 
 export default class HistoryAgent implements IAgent {
   public async execute(prompt: string, context: ConversationContext): Promise<AgentResponse> {
@@ -45,7 +48,7 @@ export default class HistoryAgent implements IAgent {
 
         **UARP JSON Structure to Generate:**
         {
-          "speech": "A friendly, concise summary of the transaction list.",
+          "speech": "A factual, one-sentence summary for the orchestrator. E.g., 'Found ${historyData.length} recent transactions.'",
           "ui": {
             "type": "LIST",
             "props": {
@@ -58,10 +61,11 @@ export default class HistoryAgent implements IAgent {
         }
         
         **Rules for Data Transformation:**
+        - The 'speech' is for the master agent's context, not the end-user. Keep it factual.
         - The user's account is ${accountId}. For each transaction, determine if it was a "send" (negative amount for user) or "receive" (positive amount).
         - The amount in the data is in tinybars. Convert it to HBAR (divide by 100,000,000) for the summary.
         - Create a clear 'primary' text, e.g., "Sent 5.25 HBAR to 0.0.67890".
-        - The speech should be a single, clear sentence, e.g., "I've found your last ${historyData.length} transactions."
+        - The date/time should be formatted nicely for the 'secondary' text.
 
         **Transaction Data:**
         ${JSON.stringify(historyData)}
@@ -98,26 +102,26 @@ export default class HistoryAgent implements IAgent {
     const queryUrl = `${MIRROR_NODE_URL}/api/v1/transactions?account.id=${accountId}&limit=${limit}&order=desc`;
     const response = await fetch(queryUrl);
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.status?.messages[0]?.message || 'Failed to fetch transaction history from the mirror node.');
+        const errorData = await response.json();
+        throw new Error(errorData.status?.messages[0]?.message || 'Failed to fetch transaction history from the mirror node.');
     }
     const data = await response.json();
     return data.transactions || [];
   }
-  
+
   private parseLimitFromPrompt(prompt: string): number {
-      const match = prompt.match(/\d+/);
-      if (match) {
-          const num = parseInt(match[0], 10);
-          if (num > 0 && num <= 100) return num;
-      }
-      return 10; // Default limit
+    const match = prompt.match(/\d+/);
+    if (match) {
+      const num = parseInt(match[0], 10);
+      if (num > 0 && num <= 100) return num;
+    }
+    return 10; // Default limit
   }
 
   private createNoHistoryResponse(context: ConversationContext): AgentResponse {
     return {
       status: 'COMPLETE',
-      speech: "It looks like there's no transaction history for this account yet.",
+      speech: "No transaction history was found for this account.",
       ui: { type: 'TEXT', props: { title: "No History Found", text: "No transactions have been recorded for this account." } },
       action: { type: 'COMPLETE_GOAL' },
       context: { ...context, status: 'complete', history: [...context.history, 'HistoryAgent found no transactions.'] },
@@ -127,7 +131,7 @@ export default class HistoryAgent implements IAgent {
   private createErrorResponse(context: ConversationContext, errorMessage: string): AgentResponse {
     return {
       status: 'COMPLETE',
-      speech: "Sorry, I couldn't pull up your transaction records right now.",
+      speech: "Error fetching transaction history.",
       ui: { type: 'TEXT', props: { title: "History Fetch Failed", text: `Error: ${errorMessage}` } },
       action: { type: 'COMPLETE_GOAL' },
       context: { ...context, status: 'failed', history: [...context.history, `HistoryAgent failed: ${errorMessage}`] },

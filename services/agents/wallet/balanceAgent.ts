@@ -1,10 +1,12 @@
+// /services/agents/wallet/balanceAgent.ts
+
 import { IAgent, AgentResponse, extractJsonFromResponse } from '../agentUtils';
 import { ConversationContext } from '../router';
 import { AccountBalanceQuery, AccountId } from '@hashgraph/sdk';
 import hederaClient from '../../../lib/hederaService';
 import { geminiModel } from '../../geminiServices';
 
-// Define the structure of the data this agent fetches
+// The structure of the data this agent fetches
 type BalanceData = {
   hbar: string;
   tokens: { tokenId: string; balance: number }[];
@@ -36,7 +38,7 @@ export default class BalanceAgent implements IAgent {
 
         **UARP JSON Structure to Generate:**
         {
-          "speech": "A friendly, concise summary of the balance. Be creative but brief.",
+          "speech": "A factual, one-sentence summary for the orchestrator. E.g., 'Balance found: X HBAR and Y tokens.'",
           "ui": {
             "type": "LIST",
             "props": {
@@ -50,7 +52,7 @@ export default class BalanceAgent implements IAgent {
         }
         
         **Rules:**
-        - The speech should be a single, clear sentence. Example: "Here's your current balance: you're holding X HBAR and Y tokens."
+        - The 'speech' is for the master agent's context, not for the end-user. Keep it factual.
         - Format the HBAR balance in the UI with commas for readability.
         - If there are tokens, add them to the "items" array in the UI.
 
@@ -68,10 +70,12 @@ export default class BalanceAgent implements IAgent {
 
       // 4. Construct the Final UARP Object
       return {
+        // This agent's turn is always complete.
         status: 'COMPLETE',
         speech: responseJson.speech,
         ui: responseJson.ui,
-        action: { type: 'COMPLETE_GOAL' }, // This agent's goal is complete.
+        // It signals its own sub-goal is finished. The router doesn't use this, but it's good practice.
+        action: { type: 'COMPLETE_GOAL' },
         context: {
           ...context,
           status: 'complete',
@@ -114,7 +118,7 @@ export default class BalanceAgent implements IAgent {
   private createErrorResponse(context: ConversationContext, errorMessage: string): AgentResponse {
     return {
       status: 'COMPLETE', // The agent's attempt is complete, even though it failed.
-      speech: "I had trouble checking your balance. There might be a temporary network issue.",
+      speech: "Error fetching balance.",
       ui: {
         type: 'TEXT',
         props: {
