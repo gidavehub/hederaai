@@ -15,7 +15,10 @@ interface ResearchResponse {
 export class GoogleSearchAgent implements IAgent {
     private isSearching: boolean = false;
 
+    // ...existing code...
     async execute(prompt: string, context: ConversationContext): Promise<AgentResponse> {
+        const isServer = typeof window === 'undefined';
+        const axios = isServer ? require('axios') : null;
         if (!prompt) {
             return {
                 status: 'AWAITING_INPUT',
@@ -54,19 +57,27 @@ export class GoogleSearchAgent implements IAgent {
         }
 
         try {
-            const response = await fetch('/api/research', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ query: prompt })
-            });
-
-            if (!response.ok) {
-                throw new Error(`Research failed: ${response.statusText}`);
+            let result: ResearchResponse;
+            if (isServer) {
+                // SSR/Node.js: Use axios
+                const response = await axios.default.post(
+                    `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000'}/api/research`,
+                    { query: prompt },
+                    { headers: { 'Content-Type': 'application/json' } }
+                );
+                result = response.data;
+            } else {
+                // Client: Use fetch
+                const response = await fetch('/api/research', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: prompt })
+                });
+                if (!response.ok) {
+                    throw new Error(`Research failed: ${response.statusText}`);
+                }
+                result = await response.json();
             }
-
-            const result: ResearchResponse = await response.json();
 
             if (result.error) {
                 throw new Error(result.error);
@@ -108,12 +119,16 @@ export class GoogleSearchAgent implements IAgent {
                 }
             };
         } catch (error: any) {
+            let message = error?.message || 'Unknown error';
+            if (error?.response?.data?.error) {
+                message += `: ${error.response.data.error}`;
+            }
             return {
                 status: 'ERROR',
-                speech: `Error performing research: ${error.message}`,
+                speech: `Error performing research: ${message}`,
                 ui: {
                     type: 'error-message',
-                    message: error.message
+                    message
                 },
                 action: { type: 'COMPLETE_GOAL' },
                 context: {

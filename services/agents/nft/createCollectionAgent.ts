@@ -112,21 +112,32 @@ export default class CreateCollectionAgent implements IAgent {
     collectionName: string,
     collectionSymbol: string
   ): Promise<CreateCollectionData> {
-    const response = await fetch('/api/createNftCollection', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        collectionName,
-        collectionSymbol,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to create NFT collection.');
+    const isServer = typeof window === 'undefined';
+    if (isServer) {
+      const axios = require('axios');
+      try {
+        const response = await axios.default.post(
+          `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000'}/api/createNftCollection`,
+          { collectionName, collectionSymbol },
+          { headers: { 'Content-Type': 'application/json' } }
+        );
+        return response.data;
+      } catch (error: any) {
+        const errorMsg = error?.response?.data?.error || error.message || 'Failed to create NFT collection.';
+        throw new Error(errorMsg);
+      }
+    } else {
+      const response = await fetch('/api/createNftCollection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collectionName, collectionSymbol }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create NFT collection.');
+      }
+      return await response.json();
     }
-
-    return await response.json();
   }
 
   private requestCollectionInfo(context: ConversationContext, prompt: string): AgentResponse {

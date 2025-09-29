@@ -2,9 +2,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { AgentDisplay } from '../components/AgentDisplay';
-import { AuroraInputBar } from '../components/AuroraInputBar';
+import { NexusBar } from '../components/NexusBar'; // UPDATED
 import { AgentUARP } from '../lib/types';
 
 export type ListeningStatus = 'idle' | 'recording' | 'transcribing';
@@ -25,10 +25,12 @@ export default function HederaAIPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [listeningStatus, setListeningStatus] = useState<ListeningStatus>('idle');
   const [isUserLoggedIn, setIsUserLoggedIn] = useState(false);
+  const [isInputActive, setIsInputActive] = useState(false); // NEW STATE for particle reactions
   const isInitialized = useRef(false);
 
-  // --- Component Logic (Unchanged) ---
+  // --- Core Application Logic ---
   useEffect(() => {
+    // This initialization logic remains sound.
     const storedUserData = localStorage.getItem(USER_DATA_KEY);
     if (storedUserData) {
       setIsUserLoggedIn(true);
@@ -49,6 +51,8 @@ export default function HederaAIPage() {
   }, []);
 
   const handleSubmit = async (prompt: string) => {
+    // When a submission happens, the modal will show loading, so the input is no longer "active" for reactions.
+    setIsInputActive(false); 
     if (activeResponse) setActiveResponse(null);
     setIsLoading(true);
     setInputValue('');
@@ -57,8 +61,15 @@ export default function HederaAIPage() {
       if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
       const uarpResponse = await response.json();
       const newResponse: AgentUARP = { id: `agent-${Date.now()}`, speech: uarpResponse.speech, ui: uarpResponse.ui, action: uarpResponse.action, context: uarpResponse.context };
+      
       setActiveResponse(newResponse);
       setContext(uarpResponse.context);
+      
+      // If the new UI requires input, mark the input as active to trigger particle reactions.
+      if (newResponse.ui?.type === 'INPUT') {
+        setIsInputActive(true);
+      }
+
       if (uarpResponse.speech) speak(uarpResponse.speech);
       if (uarpResponse.action?.type === 'SAVE_CREDENTIALS') {
         const { name, accountId, privateKey } = uarpResponse.action.payload;
@@ -75,18 +86,23 @@ export default function HederaAIPage() {
   };
 
   const handleLogout = () => { localStorage.removeItem(USER_DATA_KEY); setIsUserLoggedIn(false); window.location.reload(); };
-  const speak = (text: string) => { if (typeof window !== 'undefined' && window.speechSynthesis) { window.speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(text); utterance.rate = 1.2; window.speechSynthesis.speak(utterance); } };
+  const speak = (text: string) => { if (typeof window !== 'undefined' && window.speechSynthesis) { window.speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(text); utterance.rate = 1.1; window.speechSynthesis.speak(utterance); } };
+  
+  // --- Voice Input Logic (Updated to control isInputActive) ---
   const recorderRef = useRef<any | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const spacebarHoldTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const startListening = async () => { if (listeningStatus !== 'idle' || recorderRef.current) return; try { const RecordRTC = (await import('recordrtc')).default; const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); mediaStreamRef.current = stream; recorderRef.current = new RecordRTC.RecordRTCPromisesHandler(stream, { type: 'audio', mimeType: 'audio/webm' }); await recorderRef.current.startRecording(); setListeningStatus('recording'); } catch (err) { console.error("Error starting recorder:", err); setListeningStatus('idle'); recorderRef.current = null; mediaStreamRef.current = null; } };
-  const stopListening = async () => { if (listeningStatus !== 'recording' || !recorderRef.current) return; try { setListeningStatus('transcribing'); const dataUrl = await recorderRef.current.stopRecording(); const audioBlob = await fetch(dataUrl).then(res => res.blob()); if (mediaStreamRef.current) { mediaStreamRef.current.getTracks().forEach(track => track.stop()); mediaStreamRef.current = null; } recorderRef.current = null; const formData = new FormData(); formData.append('file', audioBlob, 'recording.webm'); const response = await fetch('/api/transcribe', { method: 'POST', body: formData }); if (!response.ok) { const errorData = await response.json(); throw new Error(errorData.details || errorData.error || 'Transcription failed'); } const result = await response.json(); if (result.text && result.text.trim()) { handleSubmit(result.text); } else { console.log("Transcription successful but returned no text."); } } catch (error) { console.error("Error during transcription:", (error as Error).message); } finally { setListeningStatus('idle'); } };
+  const startListening = async () => { if (listeningStatus !== 'idle' || recorderRef.current) return; try { setIsInputActive(true); /* ACTIVATE REACTION */ const RecordRTC = (await import('recordrtc')).default; const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); mediaStreamRef.current = stream; recorderRef.current = new RecordRTC.RecordRTCPromisesHandler(stream, { type: 'audio', mimeType: 'audio/webm' }); await recorderRef.current.startRecording(); setListeningStatus('recording'); } catch (err) { console.error("Error starting recorder:", err); setListeningStatus('idle'); setIsInputActive(false); recorderRef.current = null; mediaStreamRef.current = null; } };
+  const stopListening = async () => { if (listeningStatus !== 'recording' || !recorderRef.current) return; try { setListeningStatus('transcribing'); const dataUrl = await recorderRef.current.stopRecording(); const audioBlob = await fetch(dataUrl).then(res => res.blob()); if (mediaStreamRef.current) { mediaStreamRef.current.getTracks().forEach(track => track.stop()); mediaStreamRef.current = null; } recorderRef.current = null; const formData = new FormData(); formData.append('file', audioBlob, 'recording.webm'); const response = await fetch('/api/transcribe', { method: 'POST', body: formData }); if (!response.ok) { const errorData = await response.json(); throw new Error(errorData.details || errorData.error || 'Transcription failed'); } const result = await response.json(); if (result.text && result.text.trim()) { handleSubmit(result.text); } else { console.log("Transcription successful but returned no text."); } } catch (error) { console.error("Error during transcription:", (error as Error).message); } finally { setListeningStatus('idle'); setIsInputActive(false); /* DEACTIVATE REACTION */ } };
   useEffect(() => { const handleKeyDown = (e: KeyboardEvent) => { if (e.code === 'Space' && listeningStatus === 'idle' && !isLoading && !e.repeat) { const target = e.target as HTMLElement; if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return; e.preventDefault(); if (!spacebarHoldTimerRef.current) { spacebarHoldTimerRef.current = setTimeout(() => startListening(), 200); } } }; const handleKeyUp = (e: KeyboardEvent) => { if (e.code === 'Space') { e.preventDefault(); if (listeningStatus === 'recording') { stopListening(); } if (spacebarHoldTimerRef.current) { clearTimeout(spacebarHoldTimerRef.current); spacebarHoldTimerRef.current = null; } } }; window.addEventListener('keydown', handleKeyDown); window.addEventListener('keyup', handleKeyUp); return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); if (spacebarHoldTimerRef.current) clearTimeout(spacebarHoldTimerRef.current); }; }, [listeningStatus, isLoading]);
+  
+  // Condition to check if an agent UI is requesting input
+  const isAgentRequestingInput = activeResponse?.ui?.type === 'INPUT';
 
   const styles = `
     @keyframes pulse-slow {
-      0%, 100% { opacity: 0.4; transform: scale(1); }
-      50% { opacity: 0.6; transform: scale(1.05); }
+      0%, 100% { opacity: 0.6; transform: scale(1); }
+      50% { opacity: 0.8; transform: scale(1.05); }
     }
     .main-container {
       display: flex;
@@ -98,70 +114,35 @@ export default function HederaAIPage() {
       position: relative;
     }
     .magical-background-container {
-      position: absolute;
-      top: 0; right: 0; bottom: 0; left: 0;
-      z-index: -20;
-      overflow: hidden;
-      background-color: #f8fafc; /* slate-50 */
+      position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+      z-index: -20; overflow: hidden; background-color: #f8fafc; /* slate-50 */
     }
     .magical-background-shape-1 {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 50vw;
-      height: 50vh;
-      background-image: linear-gradient(to bottom right, #cffafe, #dbeafe); /* from-cyan-100 to-blue-200 */
-      border-radius: 9999px;
-      filter: blur(48px); /* blur-3xl */
-      opacity: 0.4;
-      animation: pulse-slow 15s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      position: absolute; top: -20vh; left: -20vw; width: 70vw; height: 70vh;
+      background-image: linear-gradient(to bottom right, #cffafe, #dbeafe);
+      border-radius: 9999px; filter: blur(64px); /* blur-4xl */ opacity: 0.6;
+      animation: pulse-slow 20s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     }
     .magical-background-shape-2 {
-      position: absolute;
-      bottom: 0;
-      right: 0;
-      width: 50vw;
-      height: 50vh;
-      background-image: linear-gradient(to bottom right, #f3e8ff, #fbcfe8); /* from-purple-100 to-pink-200 */
-      border-radius: 9999px;
-      filter: blur(48px); /* blur-3xl */
-      opacity: 0.3;
-      animation: pulse-slow 15s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-      animation-delay: -5s;
+      position: absolute; bottom: -20vh; right: -20vw; width: 70vw; height: 70vh;
+      background-image: linear-gradient(to bottom right, #f3e8ff, #fbcfe8);
+      border-radius: 9999px; filter: blur(64px); /* blur-4xl */ opacity: 0.5;
+      animation: pulse-slow 20s cubic-bezier(0.4, 0, 0.6, 1) infinite; animation-delay: -7s;
     }
     .logout-container {
-      position: absolute;
-      top: 1rem;
-      right: 1rem;
-      z-index: 20;
+      position: absolute; top: 1rem; right: 1rem; z-index: 20;
     }
     .logout-button {
-      padding-left: 1rem;
-      padding-right: 1rem;
-      padding-top: 0.5rem;
-      padding-bottom: 0.5rem;
-      background-color: rgba(255, 255, 255, 0.5);
-      color: #475569; /* slate-600 */
-      backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px);
-      font-size: 0.75rem;
-      border-radius: 9999px;
-      transition: all 0.2s;
+      padding: 0.5rem 1rem; background-color: rgba(255, 255, 255, 0.5);
+      color: #475569; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      font-size: 0.75rem; border-radius: 9999px; transition: all 0.2s;
       box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-      border: none;
-      cursor: pointer;
+      border: none; cursor: pointer;
     }
-    .logout-button:hover {
-      background-color: rgba(255, 255, 255, 0.8);
-    }
+    .logout-button:hover { background-color: rgba(255, 255, 255, 0.8); }
     .input-bar-container {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      padding: 1rem;
-      background-color: transparent;
-      z-index: 10;
+      position: absolute; bottom: 0; left: 0; right: 0;
+      padding: 1.5rem 1rem; background-color: transparent; z-index: 20;
     }
   `;
 
@@ -172,32 +153,42 @@ export default function HederaAIPage() {
         <MagicalBackground />
         {isUserLoggedIn && (
           <div className="logout-container">
-            <button onClick={handleLogout} className="logout-button">
-              Logout
-            </button>
+            <button onClick={handleLogout} className="logout-button">Logout</button>
           </div>
         )}
+        
         <AnimatePresence>
           {activeResponse && (
             <AgentDisplay
               key={activeResponse.id}
               response={activeResponse}
               onSubmit={handleSubmit}
-              sharedInputState={{
-                value: inputValue,
-                onChange: (e) => setInputValue(e.target.value),
-              }}
+              isInputActive={isInputActive || isAgentRequestingInput} // Pass reactive state to AgentDisplay
             />
           )}
         </AnimatePresence>
+
         <div className="input-bar-container">
-          <AuroraInputBar
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onSubmit={(e) => { e.preventDefault(); if (inputValue.trim()) handleSubmit(inputValue); }}
-            isLoading={isLoading}
-            listeningStatus={listeningStatus}
-          />
+          <AnimatePresence>
+            {!activeResponse && (
+              <motion.div
+                initial={{ opacity: 0, y: 50 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 50 }}
+                transition={{ type: 'spring', damping: 20, stiffness: 120 }}
+              >
+                <NexusBar
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onSubmit={(e) => { e.preventDefault(); if (inputValue.trim()) handleSubmit(inputValue); }}
+                  isLoading={isLoading}
+                  listeningStatus={listeningStatus}
+                  onFocus={() => setIsInputActive(true)}
+                  onBlur={() => setIsInputActive(false)}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </main>
     </>
