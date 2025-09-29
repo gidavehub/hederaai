@@ -23,6 +23,9 @@ export const AGENT_REGISTRY: Record<string, AgentManifest> = {
   "wallet/balanceAgent": {
     description: "A specialist tool that, when called with a Hedera account ID, fetches and returns the HBAR and token balances. It performs a single, focused task."
   },
+  "wallet/createAccountAgent": {
+    description: "A specialist tool that creates a new Hedera account, collects initial balance, and returns the account ID and keys. Prompts the user for initial balance if not provided."
+  },
 
   "wallet/historyAgent": {
     description: "A specialist tool that, when called with a Hedera account ID, retrieves a list of recent transactions from the Mirror Node. It performs a single, focused task."

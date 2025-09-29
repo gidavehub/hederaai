@@ -5,57 +5,172 @@ import { ConversationContext } from '../router';
 import { geminiModel } from '../../geminiServices';
 
 // This is the "shape" of the information this agent needs to collect.
-const REQUIRED_INFO = ["name", "accountId", "privateKey"];
+// **MODIFICATION**: Added 'password' to the required info.
+const REQUIRED_INFO = ["name", "password", "accountId", "privateKey"];
 
 export default class OnboardingAgent implements IAgent {
   public async execute(prompt: string, context: ConversationContext): Promise<AgentResponse> {
-    console.log('[OnboardingAgent V2] Executing with AI-driven UI generation...');
+    console.log('[OnboardingAgent V3] Executing with branching logic...');
     let updatedContext = { ...context };
 
-    // --- State Logic: Save the previous prompt if it was an answer ---
-    if (context.collected_info.onboarding_step) {
-      const currentStep = context.collected_info.onboarding_step;
-      updatedContext.collected_info[currentStep] = prompt;
+    // --- State Logic: Handle user responses from previous turns ---
+    const currentStepKey = context.collected_info.onboarding_step;
+
+    if (currentStepKey && currentStepKey !== 'account_id_choice') {
+      updatedContext.collected_info[currentStepKey] = prompt;
     }
 
-    // --- AI-Driven UI Generation ---
-    // 1. Find the first piece of required information that we don't have.
+    // --- State Logic: Handle the choice between creating/providing an account ---
+    if (currentStepKey === 'account_id_choice') {
+      if (prompt === 'create_new_account') {
+        // User wants a new account. Delegate to the createAccountAgent.
+        return this.delegateToCreateAccount(updatedContext);
+      }
+      if (prompt === 'provide_existing_account') {
+        // User has an account. We'll proceed to ask for the accountId.
+        // We clear the step so the main logic can find the next required info.
+        updatedContext.collected_info.onboarding_step = null;
+      }
+    }
+    
+    // --- State Logic: Handle resuming after account creation ---
+    // The Router/GeneralAgent will place specialist results here.
+    const createAccountResult = context.collected_info.specialist_results?.[0];
+    if (createAccountResult && createAccountResult.context?.goal === 'createAccount') {
+        console.log('[OnboardingAgent V3] Resuming from CreateAccountAgent result.');
+        const { lastCreatedAccountId, lastCreatedAccountPrivateKey } = createAccountResult.context.collected_info;
+        if (lastCreatedAccountId && lastCreatedAccountPrivateKey) {
+            updatedContext.collected_info.accountId = lastCreatedAccountId;
+            updatedContext.collected_info.privateKey = lastCreatedAccountPrivateKey;
+            // Clean up the specialist results so we don't process them again.
+            delete updatedContext.collected_info.specialist_results;
+        }
+    }
+
+
+    // --- Main Logic: Find the next piece of info to collect ---
     const nextInfoToCollect = REQUIRED_INFO.find(info => !updatedContext.collected_info[info]);
 
     if (nextInfoToCollect) {
-      // 2. If we need more info, ask the AI to generate the next question and UI.
+      // **MODIFICATION**: Special branching logic for account ID.
+      if (nextInfoToCollect === 'accountId') {
+        return this.generateAccountChoiceResponse(updatedContext);
+      }
+      // For all other info, use the standard AI question generator.
       return this.generateAIQuestionResponse(nextInfoToCollect, updatedContext);
     } else {
-      // 3. If we have everything, generate the final success response.
+      // If we have everything, generate the final success response.
       return this.generateCompletionResponse(updatedContext);
     }
+  }
+
+  /**
+   * Generates a UI to ask the user if they have an account or need a new one.
+   */
+  private generateAccountChoiceResponse(context: ConversationContext): AgentResponse {
+    const currentStep = REQUIRED_INFO.indexOf('accountId') + 1;
+    const totalSteps = REQUIRED_INFO.length;
+
+    return {
+      status: 'AWAITING_INPUT',
+      speech: "Great. Now, do you already have a Hedera account ID and private key, or would you like me to create a new one for you?",
+      ui: {
+        type: 'LAYOUT_STACK',
+        props: {
+          children: [
+            {
+              type: 'STEPPER',
+              props: {
+                currentStep: currentStep,
+                totalSteps: totalSteps,
+                title: "Account Setup"
+              }
+            },
+            {
+              type: 'TEXT', // Adding a text component for more context
+              props: {
+                title: "Hedera Account",
+                text: "To interact with the network, you need a Hedera account. You can provide your existing credentials or create a new, free testnet account."
+              }
+            },
+            {
+              type: 'BUTTON_GROUP', // This is a new, conceptual UI component
+              props: {
+                buttons: [
+                  { text: "I have an account", payload: "provide_existing_account" },
+                  { text: "Create a new account", payload: "create_new_account" },
+                ]
+              }
+            }
+          ]
+        }
+      },
+      action: { type: 'REQUEST_USER_INPUT' },
+      context: {
+        ...context,
+        collected_info: {
+          ...context.collected_info,
+          onboarding_step: 'account_id_choice', // Special step for the choice
+        },
+        status: 'awaiting_user_input',
+        history: [...context.history, `OnboardingAgent is asking for account choice.`],
+      },
+    };
+  }
+
+  /**
+   * Generates a DELEGATE response to trigger the CreateAccountAgent.
+   */
+  private delegateToCreateAccount(context: ConversationContext): AgentResponse {
+    return {
+      status: 'DELEGATING',
+      speech: "Excellent! I'll create a new secure testnet account for you now. One moment.",
+      ui: {
+        type: 'LOADING',
+        props: {
+          text: "Generating new Hedera account..."
+        }
+      },
+      action: {
+        type: 'DELEGATE',
+        payload: {
+          agent: 'wallet/createAccountAgent',
+          prompt: 'The user wants to create a new Hedera account during onboarding.'
+        }
+      },
+      context: {
+        ...context,
+        status: 'delegating',
+        history: [...context.history, 'OnboardingAgent is delegating to CreateAccountAgent.'],
+      }
+    };
   }
 
   /**
    * Generates a UARP response by asking an LLM to design the UI for the next question.
    */
   private async generateAIQuestionResponse(infoNeeded: string, context: ConversationContext): Promise<AgentResponse> {
-    
     const currentStep = REQUIRED_INFO.indexOf(infoNeeded) + 1;
     const totalSteps = REQUIRED_INFO.length;
 
-    // This is the new "brain" of the agent. It's an instruction set for the LLM.
+    // **MODIFICATION**: The LLM prompt is updated to be aware of the 'password' field.
     const llmPrompt = `
       You are a friendly and efficient Onboarding AI Assistant for "Hedera AI".
-      Your goal is to collect a user's name, Hedera account ID, and private key, one step at a time, by generating a complete UARP JSON response.
+      Your goal is to collect a user's name, a new password, Hedera account ID, and private key, one step at a time, by generating a complete UARP JSON response.
 
       **Your UI Design Palette (The components you MUST use):**
       - **'LAYOUT_STACK'**: The main container for showing multiple components.
       - **'STEPPER'**: A visual indicator of progress. Props: { currentStep: number, totalSteps: number, title: string }.
-      - **'TEXT_INPUT'**: The component for asking for user input. It renders a title, a text field, and a submit button. Props: { title: string, placeholder: string, buttonText: string }.
+      - **'TEXT_INPUT'**: The component for asking for user input. It renders a title, a text field, and a submit button. Props: { title: string, placeholder: string, buttonText: string, inputType: "text" | "password" }.
 
       **Your Thought Process:**
       1.  Look at the "Information to Collect" and the "User's Current Info".
-      2.  Formulate a friendly, conversational 'speech' message to ask for the required information. DO NOT repeat the question text in the speech. The speech is a guide, the UI is the action.
+      2.  Formulate a friendly, conversational 'speech' message to ask for the required information. DO NOT repeat the question text in the speech.
       3.  Design the 'ui' object using your UI Design Palette.
           - ALWAYS use a 'LAYOUT_STACK' as the root UI element.
-          - ALWAYS include a 'STEPPER' to show the user their progress.
-          - ALWAYS include a 'TEXT_INPUT' component to ask the question and provide a way to submit. Make the 'title' a clear question. Use a helpful 'placeholder' and a clear 'buttonText' like "Continue" or "Submit".
+          - ALWAYS include a 'STEPPER'.
+          - ALWAYS include a 'TEXT_INPUT' component.
+          - **IMPORTANT**: When asking for 'password' or 'privateKey', set the 'inputType' prop of 'TEXT_INPUT' to "password" to obscure the text field.
 
       **Your Response MUST be only the raw UARP JSON object.**
 
@@ -92,11 +207,10 @@ export default class OnboardingAgent implements IAgent {
       };
     } catch (error: any) {
       console.error('[OnboardingAgent-AI] Error:', error);
-      // Fallback to a simple error message if the AI fails
       return {
         status: 'COMPLETE',
         speech: "I'm having a little trouble setting up. Please try again in a moment.",
-        ui: { type: 'TEXT', props: { title: "Onboarding Error", text: error.message } },
+        ui: { type: 'TEXT', props: { title: "Onboarding Error", text: "Failed to generate the next step." } },
         action: { type: 'COMPLETE_GOAL' },
         context: { ...context, status: 'failed' },
       };
@@ -104,14 +218,15 @@ export default class OnboardingAgent implements IAgent {
   }
 
   /**
-   * Generates the final UARP response when onboarding is complete. (Unchanged)
+   * Generates the final UARP response when onboarding is complete.
    */
   private generateCompletionResponse(context: ConversationContext): AgentResponse {
-    const { name, accountId, privateKey } = context.collected_info;
+    // **MODIFICATION**: Destructure the new password field and include it in the payload.
+    const { name, accountId, privateKey, password } = context.collected_info;
     
     return {
       status: 'COMPLETE',
-      speech: `All set, ${name}! I've securely saved your credentials. You can now use the Nexus Bar to command the network.`,
+      speech: `All set, ${name}! I've securely encrypted and saved your credentials. You can now use the Nexus Bar to command the network.`,
       ui: {
         type: 'KEY_VALUE_DISPLAY',
         props: {
@@ -125,10 +240,13 @@ export default class OnboardingAgent implements IAgent {
       },
       action: {
         type: 'SAVE_CREDENTIALS',
-        payload: { name, accountId, privateKey },
+        payload: { name, accountId, privateKey, password }, // Password is now included
       },
       context: {
         ...context,
+        collected_info: { // Persist credentials in context for the session
+          ...context.collected_info,
+        },
         status: 'complete',
         goal: 'onboarding_complete',
         history: [...context.history, 'OnboardingAgent completed successfully.'],

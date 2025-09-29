@@ -5,11 +5,11 @@ import { callAgent, AgentResponse } from './agentUtils';
 /**
  * The main entry point for routing all user requests.
  *
- * REFINED ARCHITECTURE V2:
+ * REFINED ARCHITECTURE V3:
  * 1. Gatekeeper: Handles onboarding and multi-turn conversations in progress.
  * 2. Mandatory Delegation to GeneralAgent: All new prompts are ALWAYS sent to the GeneralAgent for planning.
- * 3. Execution Loop: The Router acts as an executor for the GeneralAgent's plans.
- * 4. Synthesis Loop: Results are sent BACK to the GeneralAgent for synthesis.
+ * 3. Generalized Execution Loop: The Router can now execute a `DELEGATE` action from ANY agent.
+ * 4. Intelligent Resume Loop: Results are sent BACK to the original delegating agent for processing.
  */
 
 export type ConversationContext = {
@@ -24,71 +24,91 @@ export type ConversationContext = {
 export async function routeRequest(prompt: string, context: ConversationContext | null): Promise<AgentResponse> {
   // --- 1. GATEKEEPER & CONTINUITY LOGIC ---
 
+  // On first-ever load, force onboarding.
   if (!context || !context.collected_info.accountId) {
-    console.log('[Router] New user detected. Forcing onboarding.');
-    // We haven't created onboardingAgent yet, so return a placeholder. This avoids the crash.
-    // In a real scenario, this would call the actual agent.
     if (!prompt) { // Initial load before user has typed anything
+      console.log('[Router] New user detected. Forcing onboarding.');
       const onboardingContext = initializeContext('utility/onboardingAgent', "Begin Onboarding");
       return callAgent('utility/onboardingAgent', "Begin Onboarding", onboardingContext);
     }
-    // If a logged-out user types something, the GeneralAgent should handle it.
-    // We will let it fall through for now, assuming login is handled on the frontend.
   }
 
+  // If we are in the middle of a multi-turn conversation, continue with that agent.
   if (context && context.status === 'awaiting_user_input') {
     console.log('[Router] Continuing an existing multi-turn interaction.');
     const activeAgentName = context.call_stack[context.call_stack.length - 1];
-    return callAgent(activeAgentName, prompt, context);
+    const continuedResponse = await callAgent(activeAgentName, prompt, context);
+
+    // **CRITICAL UPGRADE**: The continuing agent might delegate. We must handle its response.
+    return await processAgentResponse(continuedResponse, prompt);
   }
 
   // --- 2. NEW REQUEST: ALWAYS DELEGATE TO GENERAL AGENT FOR PLANNING ---
 
   console.log('[Router] New request. Passing to GeneralAgent for planning.');
   
-  // *** CRITICAL FIX: Sanitize the context before starting a new plan. ***
-  const planContext = initializeContext('general/generalAgent', prompt, context.collected_info);
+  const planContext = initializeContext('general/generalAgent', prompt, context?.collected_info);
   
   const planResponse = await callAgent('general/generalAgent', prompt, planContext);
 
-  // --- 3. EXECUTION & SYNTHESIS LOGIC (Delegation Logic) ---
+  // --- 3. EXECUTION & RESUME LOGIC (Process the response from the initial agent) ---
+  return await processAgentResponse(planResponse, prompt);
+}
 
-  const actionType = planResponse.action?.type;
 
-  if (actionType === 'DELEGATE' || actionType === 'DELEGATE_PARALLEL') {
-    console.log(`[Router] GeneralAgent planned a ${actionType} action. Executing tasks.`);
-    
-    const tasks = actionType === 'DELEGATE' 
-      ? [planResponse.action.payload] 
-      : planResponse.action.payload;
+/**
+ * **The Core Execution Engine**
+ * This function inspects an agent's response. If it's a simple response, it returns it.
+ * If it's a DELEGATE action, it executes the sub-tasks and calls the original agent
+ * back with the results for synthesis/resumption.
+ */
+async function processAgentResponse(agentResponse: AgentResponse, originalPrompt: string): Promise<AgentResponse> {
+    const actionType = agentResponse.action?.type;
 
-    if (!tasks || tasks.length === 0) {
-        console.error("[Router] DELEGATE action received with no tasks. Completing goal.");
-        return { ...planResponse, action: { type: 'COMPLETE_GOAL' }};
+    if (actionType === 'DELEGATE' || actionType === 'DELEGATE_PARALLEL') {
+        console.log(`[Router] Detected a ${actionType} action. Executing tasks.`);
+        
+        const tasks = actionType === 'DELEGATE' 
+        ? [agentResponse.action.payload] 
+        : agentResponse.action.payload;
+
+        if (!tasks || tasks.length === 0) {
+            console.error("[Router] DELEGATE action received with no tasks. Completing goal.");
+            return { ...agentResponse, status: 'COMPLETE', action: { type: 'COMPLETE_GOAL' }};
+        }
+
+        const specialistPromises = tasks.map((task: any) =>
+            callAgent(task.agent, task.prompt, agentResponse.context)
+        );
+        const specialistResults = await Promise.all(specialistPromises);
+
+        const resumeContext: ConversationContext = {
+            ...agentResponse.context,
+            status: 'pending', // Reset status for the resuming agent
+            collected_info: {
+                ...agentResponse.context.collected_info,
+                specialist_results: specialistResults,
+            },
+            history: [...agentResponse.context.history, 'All specialist tasks completed. Preparing to resume.'],
+        };
+
+        // **CRITICAL CHANGE**: Instead of always calling GeneralAgent, we find the agent
+        // that made the delegation plan (the last agent on the stack) and call it again.
+        const resumingAgentName = agentResponse.context.call_stack[agentResponse.context.call_stack.length - 1];
+        
+        console.log(`[Router] All specialists finished. Calling ${resumingAgentName} to resume its flow.`);
+        
+        // Call the original agent again with the results of the specialists.
+        const finalResponse = await callAgent(resumingAgentName, originalPrompt, resumeContext);
+
+        // It's possible the resumed agent delegates AGAIN, so we recursively process.
+        return processAgentResponse(finalResponse, originalPrompt);
     }
 
-    const specialistPromises = tasks.map((task: any) =>
-      callAgent(task.agent, task.prompt, planResponse.context)
-    );
-    const specialistResults = await Promise.all(specialistPromises);
-
-    const synthesisContext: ConversationContext = {
-      ...planResponse.context,
-      status: 'pending',
-      collected_info: {
-        ...planResponse.context.collected_info,
-        specialist_results: specialistResults, // Pass the full results, including any errors
-      },
-      history: [...planResponse.context.history, 'All specialist tasks completed. Preparing for synthesis.'],
-    };
-
-    console.log('[Router] All specialists finished. Calling GeneralAgent for synthesis.');
-    return await callAgent('general/generalAgent', prompt, synthesisContext);
-  }
-
-  // If the action is not a delegation, return the GeneralAgent's direct response.
-  console.log('[Router] GeneralAgent handled request directly. Returning its response.');
-  return planResponse;
+    // If the action is not a delegation, the flow is complete for this turn.
+    // Return the agent's direct response (e.g., AWAITING_INPUT or COMPLETE).
+    console.log(`[Router] Agent returned a final status for this turn: ${agentResponse.status}.`);
+    return agentResponse;
 }
 
 
@@ -103,18 +123,19 @@ function initializeContext(
   existingInfo: { [key:string]: any } = {}
 ): ConversationContext {
   
-  // This is the sanitization step. We create a new object with only the keys we want to preserve.
+  // This is the sanitization step. We create a new object with only the keys we want to preserve across goals.
   const preservedInfo = {
     name: existingInfo.name,
     accountId: existingInfo.accountId,
+    privateKey: existingInfo.privateKey, // Pass these through so GeneralAgent is aware
+    password: existingInfo.password,
     long_term_memory: existingInfo.long_term_memory,
-    // CRITICAL: We explicitly DO NOT copy keys like 'specialist_results' or 'originalPrompt' from the previous turn.
   };
 
   const context: ConversationContext = {
     goal: agentName.split('/')[1].replace('Agent', ''),
     status: 'pending',
-    collected_info: { ...preservedInfo, originalPrompt: prompt }, // Add the new originalPrompt
+    collected_info: { ...preservedInfo, originalPrompt: prompt },
     call_stack: [agentName],
     history: [`User initiated goal with prompt: "${prompt}"`],
   };

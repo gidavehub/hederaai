@@ -32,8 +32,8 @@ const ThemedText = ({ text, title }: { text: string, title?: string }) => (
   </div>
 );
 
-// *** NEW: SELF-CONTAINED TEXT INPUT FOR MODAL ***
-const TextInput = ({ placeholder = "Enter value...", buttonText = "Submit", title, onSubmit }: { placeholder?: string, buttonText?: string, title?: string, onSubmit: (value: string) => void }) => {
+// *** UPGRADED: TEXT INPUT PRIMITIVE ***
+const TextInput = ({ placeholder = "Enter value...", buttonText = "Submit", title, inputType = "text", onSubmit }: { placeholder?: string, buttonText?: string, title?: string, inputType?: 'text' | 'password', onSubmit: (value: string) => void }) => {
     const [localValue, setLocalValue] = useState('');
   
     const handleSubmit = (e: FormEvent) => {
@@ -50,7 +50,7 @@ const TextInput = ({ placeholder = "Enter value...", buttonText = "Submit", titl
         {title && <h4 className="text-input-title">{title}</h4>}
         <form onSubmit={handleSubmit} className="text-input-form">
           <input
-            type="text"
+            type={inputType} // MODIFICATION: Respects the inputType prop for passwords
             value={localValue}
             onChange={(e) => setLocalValue(e.target.value)}
             placeholder={placeholder}
@@ -64,6 +64,22 @@ const TextInput = ({ placeholder = "Enter value...", buttonText = "Submit", titl
       </div>
     );
 };
+
+// *** NEW: BUTTON GROUP PRIMITIVE ***
+const ButtonGroup = ({ buttons, onSubmit }: { buttons: { text: string, payload: string }[], onSubmit: (value: string) => void }) => (
+    <div className="button-group-container">
+        {(buttons || []).map((button, index) => (
+            <button
+                key={index}
+                onClick={() => onSubmit(button.payload)}
+                className="button-group-btn"
+            >
+                {button.text}
+            </button>
+        ))}
+    </div>
+);
+
 
 const Stepper = ({ currentStep, totalSteps, title }: { currentStep: number, totalSteps: number, title?: string }) => (
     <div className="stepper">
@@ -119,9 +135,10 @@ const ConfirmationPrompt = ({ title, text, confirmText = "Confirm", cancelText =
     </div>
 );
 
-const Button = ({ text, onClick }: { text: string, onClick: () => void }) => (
-    <button onClick={onClick} className="standalone-button">{text}</button>
+const Button = ({ text, onClick, payload }: { text: string, payload: string, onClick: (payload: string) => void }) => (
+    <button onClick={() => onClick(payload)} className="standalone-button">{text}</button>
 );
+
 
 const LoadingIndicator = ({ text = "Thinking..." }: { text?: string }) => (
     <div className="loading-indicator-container">
@@ -170,13 +187,14 @@ const RenderUINode = ({ uiData, onSubmit }: { uiData: UIComponentData | UILayout
     case 'LAYOUT_STACK':
       return <div className="layout-stack">{(props.children || []).map((child: any, index: number) => <RenderUINode key={index} uiData={child} onSubmit={onSubmit} />)}</div>;
     
-    // *** CORRECTED: Renders the new TextInput component ***
-    case 'INPUT': return <TextInput {...props} onSubmit={onSubmit} />;
+    // *** MODIFIED & NEW CASES ***
+    case 'TEXT_INPUT': return <TextInput {...props} onSubmit={onSubmit} />;
+    case 'BUTTON_GROUP': return <ButtonGroup {...props} onSubmit={onSubmit} />;
     
     // Standard Primitives
     case 'TEXT': return <ThemedText {...props} />;
     case 'LOADING': return <LoadingIndicator {...props} />;
-    case 'BUTTON': return <Button {...props} onClick={() => onSubmit(props.payload || props.text)} />;
+    case 'BUTTON': return <Button {...props} onClick={onSubmit} />;
     case 'CHART': return <Chart {...props} />;
     case 'STEPPER': return <Stepper {...props} />;
     case 'KEY_VALUE_DISPLAY': return <KeyValueDisplay {...props} />;
@@ -227,7 +245,7 @@ export const AgentDisplay = ({ response, onSubmit, isInputActive }: AgentDisplay
     /* --- PRIMITIVE STYLES --- */
     @keyframes pulse-light { 50% { opacity: 0.7; } }
 
-    /* TextInput (for inside the modal) */
+    /* TextInput */
     .text-input-container { text-align: left; }
     .text-input-title { font-weight: 600; color: #1e293b; margin-bottom: 0.75rem; font-size: 1.125rem; }
     .text-input-form { display: flex; gap: 0.5rem; align-items: center; }
@@ -238,9 +256,14 @@ export const AgentDisplay = ({ response, onSubmit, isInputActive }: AgentDisplay
     .text-input-button:active { transform: scale(0.95); }
     .text-input-button:disabled { background-image: none; background-color: #d1d5db; cursor: not-allowed; box-shadow: none; }
 
+    /* Button Group */
+    .button-group-container { display: flex; flex-direction: column; gap: 0.75rem; }
+    @media (min-width: 640px) { .button-group-container { flex-direction: row; } }
+    .button-group-btn { flex: 1; padding: 0.75rem 1rem; border: 1px solid #cbd5e1; background-color: rgba(255, 255, 255, 0.7); color: #334155; border-radius: 0.5rem; font-weight: 600; cursor: pointer; transition: all 0.2s; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); }
+    .button-group-btn:hover { border-color: #6366f1; color: #6366f1; background-color: rgba(238, 242, 255, 0.8); }
+
     /* ThemedText */
     .themed-text { text-align: left; background: rgba(248, 250, 252, 0.6); padding: 1rem; border-radius: 0.75rem; border: 1px solid rgba(226, 232, 240, 0.8); }
-    /* ... other styles from previous version are unchanged ... */
     .themed-text-title { font-weight: 600; color: #1e293b; margin-bottom: 0.25rem; font-size: 1.125rem; }
     .themed-text-p { color: #475569; line-height: 1.625; }
     .stepper { padding: 0.5rem 1rem; background: rgba(248, 250, 252, 0.6); border-radius: 999px; border: 1px solid rgba(226, 232, 240, 0.8); display: flex; align-items: center; justify-content: center; gap: 1rem; }
@@ -251,9 +274,9 @@ export const AgentDisplay = ({ response, onSubmit, isInputActive }: AgentDisplay
     .key-value-display { background: rgba(248, 250, 252, 0.6); padding: 1rem 1.5rem; border-radius: 0.75rem; border: 1px solid rgba(226, 232, 240, 0.8); }
     .key-value-title { font-size: 1.25rem; font-weight: 700; margin-bottom: 1rem; background-image: linear-gradient(to right, #3b82f6, #8b5cf6); -webkit-background-clip: text; background-clip: text; color: transparent; }
     .key-value-dl { display: flex; flex-direction: column; gap: 0.75rem; }
-    .key-value-item { display: grid; grid-template-columns: 1fr 2fr; gap: 1rem; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid #e2e8f0; }
+    .key-value-item { display: grid; grid-template-columns: auto 1fr; gap: 1rem; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid #e2e8f0; }
     .key-value-item:last-child { border-bottom: none; }
-    .key-value-dt { color: #64748b; font-size: 0.875rem; font-weight: 500; }
+    .key-value-dt { color: #64748b; font-size: 0.875rem; font-weight: 500; white-space: nowrap; }
     .key-value-dd { color: #1e293b; font-weight: 500; word-break: break-all; }
     .data-table-container { background: rgba(248, 250, 252, 0.6); padding: 1rem; border-radius: 0.75rem; border: 1px solid rgba(226, 232, 240, 0.8); }
     .data-table-title { font-size: 1.25rem; font-weight: 700; margin-bottom: 1rem; background-image: linear-gradient(to right, #3b82f6, #8b5cf6); -webkit-background-clip: text; background-clip: text; color: transparent; }
