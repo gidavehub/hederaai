@@ -18,8 +18,6 @@ export default class CreateAccountAgent implements IAgent {
 		// STATE 2: User has seen the keys and clicked "Continue"
 		if (prompt === 'creation_confirmed') {
 			console.log('[CreateAccountAgent] User confirmed key storage. Completing task.');
-			// This response signals to the Router that this sub-task is complete.
-			// The Router will then pass its context back to the parent (OnboardingAgent).
 			return {
 				status: 'COMPLETE',
 				speech: 'Great, let\'s continue the setup process.',
@@ -27,6 +25,8 @@ export default class CreateAccountAgent implements IAgent {
 				action: { type: 'COMPLETE_GOAL' },
 				context: {
 					...context,
+					// *** MODIFICATION: Explicitly set the goal upon completion ***
+					goal: 'createAccount', 
 					status: 'complete',
 					history: [...context.history, 'CreateAccountAgent completed successfully.'],
 				},
@@ -37,10 +37,8 @@ export default class CreateAccountAgent implements IAgent {
 		try {
 			console.log('[CreateAccountAgent] Calling API to create a new testnet account.');
 			
-            // For onboarding, we use a default initial balance for the free testnet account.
-			const initialBalance = 10; 
+            const initialBalance = 10; 
 
-			// This logic simulates calling a backend API route to create the account.
 			const isServer = typeof window === 'undefined';
 			let result: CreateAccountResult;
 			if (isServer) {
@@ -66,7 +64,6 @@ export default class CreateAccountAgent implements IAgent {
 
 			console.log(`[CreateAccountAgent] Account ${result.accountId} created successfully.`);
 
-            // Prepare the response to show the user their new credentials and wait for confirmation.
 			return {
 				status: 'AWAITING_INPUT',
 				speech: `Success! I've created a new Hedera testnet account for you. Please copy and save your Private Key in a secure password manager. This key cannot be recovered if you lose it.`,
@@ -105,7 +102,6 @@ export default class CreateAccountAgent implements IAgent {
 				action: { type: 'REQUEST_USER_INPUT' },
 				context: {
 					...context,
-                    // Store the results in the context so we have them for the final step.
 					collected_info: {
 						...context.collected_info,
 						lastCreatedAccountId: result.accountId,
@@ -119,7 +115,6 @@ export default class CreateAccountAgent implements IAgent {
 
 		} catch (error: any) {
 			console.error('[CreateAccountAgent] Error:', error);
-			// If creation fails, return a COMPLETE status so the parent agent can see the error.
 			return {
 				status: 'COMPLETE',
 				speech: 'I ran into a problem while creating your account. Please try again in a moment.',
@@ -138,5 +133,5 @@ export default class CreateAccountAgent implements IAgent {
 				},
 			};
 		}
-	}
+	} 
 }

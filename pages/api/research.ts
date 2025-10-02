@@ -119,7 +119,7 @@ export default async function handler(
         }
 
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
         const prompt = `Analyze the following articles about "${query}" in the context of Hedera Hashgraph and provide:
 1. A comprehensive summary

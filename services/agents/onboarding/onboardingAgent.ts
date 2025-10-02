@@ -152,69 +152,91 @@ export default class OnboardingAgent implements IAgent {
   private async generateAIQuestionResponse(infoNeeded: string, context: ConversationContext): Promise<AgentResponse> {
     const currentStep = REQUIRED_INFO.indexOf(infoNeeded) + 1;
     const totalSteps = REQUIRED_INFO.length;
-
-    // **MODIFICATION**: The LLM prompt is updated to be aware of the 'password' field.
-    const llmPrompt = `
-      You are a friendly and efficient Onboarding AI Assistant for "Hedera AI".
-      Your goal is to collect a user's name, a new password, Hedera account ID, and private key, one step at a time, by generating a complete UARP JSON response.
-
-      **Your UI Design Palette (The components you MUST use):**
-      - **'LAYOUT_STACK'**: The main container for showing multiple components.
-      - **'STEPPER'**: A visual indicator of progress. Props: { currentStep: number, totalSteps: number, title: string }.
-      - **'TEXT_INPUT'**: The component for asking for user input. It renders a title, a text field, and a submit button. Props: { title: string, placeholder: string, buttonText: string, inputType: "text" | "password" }.
-
-      **Your Thought Process:**
-      1.  Look at the "Information to Collect" and the "User's Current Info".
-      2.  Formulate a friendly, conversational 'speech' message to ask for the required information. DO NOT repeat the question text in the speech.
-      3.  Design the 'ui' object using your UI Design Palette.
-          - ALWAYS use a 'LAYOUT_STACK' as the root UI element.
-          - ALWAYS include a 'STEPPER'.
-          - ALWAYS include a 'TEXT_INPUT' component.
-          - **IMPORTANT**: When asking for 'password' or 'privateKey', set the 'inputType' prop of 'TEXT_INPUT' to "password" to obscure the text field.
-
-      **Your Response MUST be only the raw UARP JSON object.**
-
-      ---
-      **CONTEXT FOR THIS TURN:**
-      - **Information to Collect This Turn:** "${infoNeeded}"
-      - **Current Step:** ${currentStep} of ${totalSteps}
-      - **User's Current Info:** ${JSON.stringify(context.collected_info)}
-      ---
-
-      Now, generate the complete UARP JSON to ask the user for the "${infoNeeded}".
-    `;
-
-    try {
-      const result = await geminiModel.generateContent(llmPrompt);
-      const rawResponseText = result.response.text();
-      console.log("[OnboardingAgent-AI] Raw LLM Response:", rawResponseText);
-      const responseJson = JSON.parse(extractJsonFromResponse(rawResponseText));
-
-      return {
-        status: 'AWAITING_INPUT',
-        speech: responseJson.speech,
-        ui: responseJson.ui,
-        action: { type: 'REQUEST_USER_INPUT' },
-        context: {
-          ...context,
-          collected_info: {
-            ...context.collected_info,
-            onboarding_step: infoNeeded, // Set the step for the next turn
-          },
-          status: 'awaiting_user_input',
-          history: [...context.history, `OnboardingAgent is AI-requesting '${infoNeeded}'.`],
-        },
+    let ui, speech;
+    // Unique emoji for each field
+    const emojiMap: Record<string, string> = {
+      name: '🧑',
+      accountId: '🆔',
+      privateKey: '🔑',
+      password: '🔢',
+    };
+    // Unique placeholder for each field
+    const placeholderMap: Record<string, string> = {
+      name: 'Enter your name...',
+      accountId: 'Enter your Hedera Account ID...',
+      privateKey: 'Paste your private key...',
+      password: 'Enter a numeric password...',
+    };
+    // Unique speech for each field
+    const speechMap: Record<string, string> = {
+      name: "Let's get started! What's your name?",
+      accountId: "What's your Hedera Account ID?",
+      privateKey: "Please provide your private key. Don't worry, it's encrypted!",
+      password: "Set a numeric password (numbers only) for signing transactions. Make it memorable!",
+    };
+    // UI for each field
+    if (infoNeeded === 'password') {
+      ui = {
+        type: 'LAYOUT_STACK',
+        props: {
+          children: [
+            {
+              type: 'STEPPER',
+              props: { currentStep, totalSteps, title: 'Onboarding Progress' }
+            },
+            {
+              type: 'NUMERIC_KEYPAD_INPUT',
+              props: {
+                title: 'Set Your Password',
+                buttonText: 'Save Password',
+                emoji: emojiMap[infoNeeded],
+                onSubmit: undefined // handled by AgentDisplay
+              }
+            }
+          ]
+        }
       };
-    } catch (error: any) {
-      console.error('[OnboardingAgent-AI] Error:', error);
-      return {
-        status: 'COMPLETE',
-        speech: "I'm having a little trouble setting up. Please try again in a moment.",
-        ui: { type: 'TEXT', props: { title: "Onboarding Error", text: "Failed to generate the next step." } },
-        action: { type: 'COMPLETE_GOAL' },
-        context: { ...context, status: 'failed' },
+      speech = speechMap[infoNeeded];
+    } else {
+      ui = {
+        type: 'LAYOUT_STACK',
+        props: {
+          children: [
+            {
+              type: 'STEPPER',
+              props: { currentStep, totalSteps, title: 'Onboarding Progress' }
+            },
+            {
+              type: 'TEXT_INPUT',
+              props: {
+                title: infoNeeded === 'name' ? 'Your Name' : (infoNeeded === 'accountId' ? 'Account ID' : 'Private Key'),
+                placeholder: placeholderMap[infoNeeded],
+                buttonText: 'Submit',
+                inputType: infoNeeded === 'privateKey' ? 'password' : 'text',
+                emoji: emojiMap[infoNeeded],
+                onSubmit: undefined // handled by AgentDisplay
+              }
+            }
+          ]
+        }
       };
+      speech = speechMap[infoNeeded];
     }
+    return {
+      status: 'AWAITING_INPUT',
+      speech,
+      ui,
+      action: { type: 'REQUEST_USER_INPUT' },
+      context: {
+        ...context,
+        collected_info: {
+          ...context.collected_info,
+          onboarding_step: infoNeeded,
+        },
+        status: 'awaiting_user_input',
+        history: [...context.history, `OnboardingAgent is requesting '${infoNeeded}'.`],
+      },
+    };
   }
 
   /**

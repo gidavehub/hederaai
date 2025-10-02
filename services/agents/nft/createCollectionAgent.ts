@@ -17,7 +17,7 @@ export default class CreateCollectionAgent implements IAgent {
 
     try {
       // 1. Get Required Info from Context
-      const { accountId } = context.collected_info;
+      const { accountId, password } = context.collected_info;
       if (!accountId) {
         throw new Error("accountId is missing from the context.");
       }
@@ -25,6 +25,30 @@ export default class CreateCollectionAgent implements IAgent {
       // If this is a new request, start the collection process
       if (!context.collected_info.collectionName || !context.collected_info.collectionSymbol) {
         return this.requestCollectionInfo(context, prompt);
+      }
+
+      // Security check: If password is missing, delegate to SecurityAgent
+      if (!password) {
+        return {
+          status: 'DELEGATING',
+          speech: 'Please enter your password to authorize NFT collection creation.',
+          ui: {
+            type: 'LOADING',
+            props: { text: 'Awaiting password for NFT collection creation authorization...' }
+          },
+          action: {
+            type: 'DELEGATE',
+            payload: {
+              agent: 'utility/securityAgent',
+              prompt: 'Request password for NFT collection creation authorization.'
+            }
+          },
+          context: {
+            ...context,
+            status: 'delegating',
+            history: [...context.history, 'CreateCollectionAgent delegating to SecurityAgent for password.'],
+          }
+        };
       }
 
       // 2. Execute Primary Function: Creating NFT Collection
@@ -84,11 +108,7 @@ export default class CreateCollectionAgent implements IAgent {
         ui: responseJson.ui,
         // Save the supply key in the context for potential future minting
         action: { 
-          type: 'COMPLETE_GOAL',
-          payload: {
-            collectionId: result.collectionId,
-            supplyKey: result.supplyKey
-          }
+          type: 'COMPLETE_GOAL'
         },
         context: {
           ...context,

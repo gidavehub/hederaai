@@ -15,7 +15,7 @@ export default class SendHbarAgent implements IAgent {
 
     try {
       // 1. Get Required Info from Context
-      const { accountId } = context.collected_info;
+      const { accountId, password } = context.collected_info;
       if (!accountId) {
         throw new Error("accountId is missing from the context.");
       }
@@ -23,6 +23,30 @@ export default class SendHbarAgent implements IAgent {
       // If this is a new request, start the collection process
       if (!context.collected_info.recipient || !context.collected_info.amount) {
         return this.requestTransactionInfo(context, prompt);
+      }
+
+      // Security check: If password is missing, delegate to SecurityAgent
+      if (!password) {
+        return {
+          status: 'DELEGATING',
+          speech: 'Please enter your password to authorize this transaction.',
+          ui: {
+            type: 'LOADING',
+            props: { text: 'Awaiting password for transaction authorization...' }
+          },
+          action: {
+            type: 'DELEGATE',
+            payload: {
+              agent: 'utility/securityAgent',
+              prompt: 'Request password for transaction authorization.'
+            }
+          },
+          context: {
+            ...context,
+            status: 'delegating',
+            history: [...context.history, 'SendHbarAgent delegating to SecurityAgent for password.'],
+          }
+        };
       }
 
       // 2. Execute Primary Function: Sending HBAR

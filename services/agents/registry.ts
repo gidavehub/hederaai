@@ -41,7 +41,11 @@ export const AGENT_REGISTRY: Record<string, AgentManifest> = {
   },
 
   "utility/onboardingAgent": {
-    description: "A specialist tool that manages the multi-step user onboarding conversation to collect name, account ID, and private key."
+    description: "A specialist tool that manages the multi-step user onboarding conversation to collect name, account ID, private key, and password."
+  },
+
+  "utility/securityAgent": {
+    description: "A specialist tool for transaction signing and authorization. It prompts the user for their password before any sensitive transaction (payments, transfers, etc) is executed. Should be called by any agent performing secure actions."
   },
 
   // === Research Specialist Agents ===

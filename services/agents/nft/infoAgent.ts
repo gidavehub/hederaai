@@ -1,7 +1,7 @@
 import { IAgent, ConversationContext, AgentResponse } from '../agentUtils';
 import getNftInfo from '../../../pages/api/getNftInfo';
 
-export class NftInfoAgent implements IAgent {
+export default class NftInfoAgent implements IAgent {
     private collectionId: string | null = null;
     private serialNumber: string | null = null;
 

@@ -82,6 +82,17 @@ async function processAgentResponse(agentResponse: AgentResponse, originalPrompt
         );
         const specialistResults = await Promise.all(specialistPromises);
 
+        // *** THE CRITICAL FIX STARTS HERE ***
+        // Check if any specialist needs to pause the entire flow to wait for user input.
+        const pausingSpecialist = specialistResults.find(res => res.status === 'AWAITING_INPUT');
+        if (pausingSpecialist) {
+            console.log(`[Router] A specialist (${pausingSpecialist.context.call_stack.slice(-1)[0]}) has requested user input. Pausing execution chain.`);
+            // If a specialist needs to pause, we must immediately stop and return its response.
+            // This prevents the infinite loop by not resuming the parent agent.
+            return pausingSpecialist;
+        }
+        // *** THE CRITICAL FIX ENDS HERE ***
+
         const resumeContext: ConversationContext = {
             ...agentResponse.context,
             status: 'pending', // Reset status for the resuming agent
@@ -92,13 +103,10 @@ async function processAgentResponse(agentResponse: AgentResponse, originalPrompt
             history: [...agentResponse.context.history, 'All specialist tasks completed. Preparing to resume.'],
         };
 
-        // **CRITICAL CHANGE**: Instead of always calling GeneralAgent, we find the agent
-        // that made the delegation plan (the last agent on the stack) and call it again.
         const resumingAgentName = agentResponse.context.call_stack[agentResponse.context.call_stack.length - 1];
         
         console.log(`[Router] All specialists finished. Calling ${resumingAgentName} to resume its flow.`);
         
-        // Call the original agent again with the results of the specialists.
         const finalResponse = await callAgent(resumingAgentName, originalPrompt, resumeContext);
 
         // It's possible the resumed agent delegates AGAIN, so we recursively process.
@@ -106,7 +114,6 @@ async function processAgentResponse(agentResponse: AgentResponse, originalPrompt
     }
 
     // If the action is not a delegation, the flow is complete for this turn.
-    // Return the agent's direct response (e.g., AWAITING_INPUT or COMPLETE).
     console.log(`[Router] Agent returned a final status for this turn: ${agentResponse.status}.`);
     return agentResponse;
 }
@@ -115,7 +122,6 @@ async function processAgentResponse(agentResponse: AgentResponse, originalPrompt
 /**
  * **CONTEXT SANITIZER**
  * Creates a new, clean conversation context for the start of a request flow.
- * It purposefully ONLY carries over essential, long-term user information.
  */
 function initializeContext(
   agentName: string,
@@ -123,11 +129,10 @@ function initializeContext(
   existingInfo: { [key:string]: any } = {}
 ): ConversationContext {
   
-  // This is the sanitization step. We create a new object with only the keys we want to preserve across goals.
   const preservedInfo = {
     name: existingInfo.name,
     accountId: existingInfo.accountId,
-    privateKey: existingInfo.privateKey, // Pass these through so GeneralAgent is aware
+    privateKey: existingInfo.privateKey,
     password: existingInfo.password,
     long_term_memory: existingInfo.long_term_memory,
   };

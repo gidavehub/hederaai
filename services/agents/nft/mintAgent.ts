@@ -16,7 +16,7 @@ export default class MintAgent implements IAgent {
 
     try {
       // 1. Get Required Info from Context
-      const { accountId } = context.collected_info;
+      const { accountId, password } = context.collected_info;
       if (!accountId) {
         throw new Error("accountId is missing from the context.");
       }
@@ -26,6 +26,30 @@ export default class MintAgent implements IAgent {
           !context.collected_info.metadata ||
           !context.collected_info.supplyKey) {
         return this.requestMintInfo(context, prompt);
+      }
+
+      // Security check: If password is missing, delegate to SecurityAgent
+      if (!password) {
+        return {
+          status: 'DELEGATING',
+          speech: 'Please enter your password to authorize NFT minting.',
+          ui: {
+            type: 'LOADING',
+            props: { text: 'Awaiting password for NFT minting authorization...' }
+          },
+          action: {
+            type: 'DELEGATE',
+            payload: {
+              agent: 'utility/securityAgent',
+              prompt: 'Request password for NFT minting authorization.'
+            }
+          },
+          context: {
+            ...context,
+            status: 'delegating',
+            history: [...context.history, 'MintAgent delegating to SecurityAgent for password.'],
+          }
+        };
       }
 
       // 2. Execute Primary Function: Minting NFT

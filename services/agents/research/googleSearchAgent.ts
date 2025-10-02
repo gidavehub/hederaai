@@ -12,7 +12,7 @@ interface ResearchResponse {
     error?: string;
 }
 
-export class GoogleSearchAgent implements IAgent {
+export default class GoogleSearchAgent implements IAgent {
     private isSearching: boolean = false;
 
     // ...existing code...
@@ -83,29 +83,61 @@ export class GoogleSearchAgent implements IAgent {
                 throw new Error(result.error);
             }
 
-            // Format sources for display
-            const sourcesList = result.sources
-                .map((source, index) => `${index + 1}. [${source.title}](${source.url})\n   ${source.snippet}`)
-                .join('\n\n');
+            // Format sources for AgentDisplay LIST
+            const sourcesList = result.sources.map((source) => ({
+                title: source.title,
+                description: source.snippet,
+                url: source.url
+            }));
+
+            // Placeholder for stats and charts (could be generated from result.summary or sources)
+            const stats: { label: string; value: number }[] = [
+                { label: 'Total Sources', value: result.sources.length },
+                // Add more stats as needed
+            ];
+            const chartData: { label: string; value: number }[] = [
+                // Example chart data
+                // { label: 'Project A', value: 42 },
+                // { label: 'Project B', value: 27 },
+            ];
 
             return {
                 status: 'COMPLETE',
                 speech: result.summary,
                 ui: {
-                    type: 'research-results',
-                    components: [
-                        {
-                            type: 'markdown',
-                            content: `## Research Summary\n\n${result.summary}\n\n## Sources\n\n${sourcesList}`
-                        },
-                        {
-                            type: 'button-group',
-                            buttons: result.sources.map(source => ({
-                                label: `Visit ${source.title}`,
-                                url: source.url
-                            }))
-                        }
-                    ]
+                    type: 'LAYOUT_STACK',
+                    props: {
+                        children: [
+                            {
+                                type: 'TEXT',
+                                props: {
+                                    title: 'Research Summary',
+                                    text: result.summary
+                                }
+                            },
+                            {
+                                type: 'LIST',
+                                props: {
+                                    title: 'Sources',
+                                    items: sourcesList
+                                }
+                            },
+                            {
+                                type: 'STAT',
+                                props: {
+                                    title: 'Stats',
+                                    items: stats
+                                }
+                            },
+                            {
+                                type: 'CHART',
+                                props: {
+                                    title: 'Community Activity',
+                                    data: chartData
+                                }
+                            }
+                        ]
+                    }
                 },
                 action: { type: 'COMPLETE_GOAL' },
                 context: {

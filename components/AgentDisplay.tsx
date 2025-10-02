@@ -32,8 +32,7 @@ const ThemedText = ({ text, title }: { text: string, title?: string }) => (
   </div>
 );
 
-// *** UPGRADED: TEXT INPUT PRIMITIVE ***
-const TextInput = ({ placeholder = "Enter value...", buttonText = "Submit", title, inputType = "text", onSubmit }: { placeholder?: string, buttonText?: string, title?: string, inputType?: 'text' | 'password', onSubmit: (value: string) => void }) => {
+const TextInput = ({ placeholder = "Enter value...", buttonText = "Submit", title, inputType = "text", emoji, onSubmit }: { placeholder?: string, buttonText?: string, title?: string, inputType?: 'text' | 'password', emoji?: string, onSubmit: (value: string) => void }) => {
     const [localValue, setLocalValue] = useState('');
   
     const handleSubmit = (e: FormEvent) => {
@@ -49,8 +48,9 @@ const TextInput = ({ placeholder = "Enter value...", buttonText = "Submit", titl
       <div className="text-input-container">
         {title && <h4 className="text-input-title">{title}</h4>}
         <form onSubmit={handleSubmit} className="text-input-form">
+          {emoji && <span className="text-input-emoji">{emoji}</span>}
           <input
-            type={inputType} // MODIFICATION: Respects the inputType prop for passwords
+            type={inputType}
             value={localValue}
             onChange={(e) => setLocalValue(e.target.value)}
             placeholder={placeholder}
@@ -65,7 +65,49 @@ const TextInput = ({ placeholder = "Enter value...", buttonText = "Submit", titl
     );
 };
 
-// *** NEW: BUTTON GROUP PRIMITIVE ***
+const NumericKeypadInput = ({ title, buttonText = "Save", emoji, onSubmit }: { title: string, buttonText?: string, emoji?: string, onSubmit: (value: string) => void }) => {
+    const [pin, setPin] = useState('');
+    const pinLength = 6;
+
+    const handleKeyPress = (key: string) => {
+        if (key === 'backspace') {
+            setPin(p => p.slice(0, -1));
+        } else if (pin.length < pinLength) {
+            setPin(p => p + key);
+        }
+    };
+
+    const handleSubmit = () => {
+        if (pin.length > 0) {
+            onSubmit(pin);
+        }
+    };
+
+    return (
+        <div className="numeric-keypad-container">
+            <h4 className="numeric-keypad-title">{emoji} {title}</h4>
+            <div className="numeric-keypad-display">
+                {Array.from({ length: pinLength }).map((_, index) => (
+                    <span key={index} className={`pin-dot ${index < pin.length ? 'filled' : ''}`} />
+                ))}
+            </div>
+            <div className="numeric-keypad-grid">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+                    <button key={num} onClick={() => handleKeyPress(num.toString())} className="keypad-btn">{num}</button>
+                ))}
+                <button onClick={() => handleKeyPress('backspace')} className="keypad-btn action">⌫</button>
+                <button onClick={() => handleKeyPress('0')} className="keypad-btn">0</button>
+                <button onClick={handleSubmit} className="keypad-btn action" disabled={pin.length === 0}>✓</button>
+            </div>
+        </div>
+    );
+};
+
+// *** NEW: STANDALONE BUTTON PRIMITIVE ***
+const Button = ({ text, onClick, payload }: { text: string, payload: string, onClick: (payload: string) => void }) => (
+    <button onClick={() => onClick(payload)} className="standalone-button">{text}</button>
+);
+
 const ButtonGroup = ({ buttons, onSubmit }: { buttons: { text: string, payload: string }[], onSubmit: (value: string) => void }) => (
     <div className="button-group-container">
         {(buttons || []).map((button, index) => (
@@ -79,7 +121,6 @@ const ButtonGroup = ({ buttons, onSubmit }: { buttons: { text: string, payload: 
         ))}
     </div>
 );
-
 
 const Stepper = ({ currentStep, totalSteps, title }: { currentStep: number, totalSteps: number, title?: string }) => (
     <div className="stepper">
@@ -123,22 +164,6 @@ const DataTable = ({ headers, rows, title }: { title?: string, headers: string[]
         </div>
     </div>
 );
-
-const ConfirmationPrompt = ({ title, text, confirmText = "Confirm", cancelText = "Cancel", onConfirm, onCancel }: { title: string, text: string, confirmText?: string, cancelText?: string, onConfirm: () => void, onCancel: () => void }) => (
-    <div className="confirmation-prompt">
-        <h4 className="confirmation-title">{title}</h4>
-        <p className="confirmation-text">{text}</p>
-        <div className="confirmation-buttons">
-            <button onClick={onCancel} className="confirmation-btn cancel">{cancelText}</button>
-            <button onClick={onConfirm} className="confirmation-btn confirm">{confirmText}</button>
-        </div>
-    </div>
-);
-
-const Button = ({ text, onClick, payload }: { text: string, payload: string, onClick: (payload: string) => void }) => (
-    <button onClick={() => onClick(payload)} className="standalone-button">{text}</button>
-);
-
 
 const LoadingIndicator = ({ text = "Thinking..." }: { text?: string }) => (
     <div className="loading-indicator-container">
@@ -187,20 +212,19 @@ const RenderUINode = ({ uiData, onSubmit }: { uiData: UIComponentData | UILayout
     case 'LAYOUT_STACK':
       return <div className="layout-stack">{(props.children || []).map((child: any, index: number) => <RenderUINode key={index} uiData={child} onSubmit={onSubmit} />)}</div>;
     
-    // *** MODIFIED & NEW CASES ***
-    case 'TEXT_INPUT': return <TextInput {...props} onSubmit={onSubmit} />;
-    case 'BUTTON_GROUP': return <ButtonGroup {...props} onSubmit={onSubmit} />;
-    
     // Standard Primitives
+    case 'TEXT_INPUT': return <TextInput {...props} onSubmit={onSubmit} />;
+    case 'NUMERIC_KEYPAD_INPUT': return <NumericKeypadInput {...props} onSubmit={onSubmit} />;
+    case 'BUTTON_GROUP': return <ButtonGroup {...props} onSubmit={onSubmit} />;
     case 'TEXT': return <ThemedText {...props} />;
     case 'LOADING': return <LoadingIndicator {...props} />;
-    case 'BUTTON': return <Button {...props} onClick={onSubmit} />;
     case 'CHART': return <Chart {...props} />;
     case 'STEPPER': return <Stepper {...props} />;
     case 'KEY_VALUE_DISPLAY': return <KeyValueDisplay {...props} />;
     case 'DATA_TABLE': return <DataTable {...props} />;
-    case 'CONFIRMATION_PROMPT':
-        return <ConfirmationPrompt {...props} onConfirm={() => onSubmit(props.confirmPayload || 'confirm')} onCancel={() => onSubmit(props.cancelPayload || 'cancel')} />;
+    
+    // *** FIX: ADD THE MISSING 'BUTTON' CASE ***
+    case 'BUTTON': return <Button {...props} onClick={onSubmit} />;
 
     default:
       return <div className="unknown-component"><p className="unknown-component-p-title">Unknown: "{uiData.type}"</p></div>;
@@ -213,21 +237,9 @@ export const AgentDisplay = ({ response, onSubmit, isInputActive }: AgentDisplay
   const particlesRef = useRef<any>(null);
 
   const particleOptions: IParticlesProps['options'] = useMemo(() => ({
-    fpsLimit: 120, particles: { number: { value: 80, density: { enable: true, value_area: 800 } }, color: { value: ["#3b82f6", "#8b5cf6", "#ec4899", "#22d3ee"] }, shape: { type: "circle" }, opacity: { value: {min: 0.3, max: 0.8}, animation: { enable: true, speed: 0.8, sync: false } }, size: { value: { min: 1, max: 3 } }, move: { enable: true, speed: 1.5, direction: "none", random: true, straight: false, out_mode: "out" } }, interactivity: { events: { onHover: { enable: !shouldReduceMotion, mode: "bubble" } }, modes: { bubble: { distance: 100, duration: 2, opacity: 1, size: 4 }, repulse: { distance: 150, duration: 0.4, speed: 1 } } }, detectRetina: true,
+    fpsLimit: 120, particles: { number: { value: 60, density: { enable: true, value_area: 800 } }, color: { value: ["#6366f1", "#8b5cf6", "#ec4899", "#22d3ee"] }, shape: { type: "circle" }, opacity: { value: {min: 0.1, max: 0.6}, animation: { enable: true, speed: 0.5, sync: false } }, size: { value: { min: 1, max: 3 } }, move: { enable: true, speed: 1, direction: "none", random: true, straight: false, out_mode: "out" } }, interactivity: { events: { onHover: { enable: !shouldReduceMotion, mode: "bubble" } }, modes: { bubble: { distance: 100, duration: 2, opacity: 1, size: 4 } } }, detectRetina: true,
   }), [shouldReduceMotion]);
   
-  useEffect(() => {
-    const particles = particlesRef.current; if (!particles) return;
-    if (isInputActive) {
-      particles.options.interactivity.events.onHover.enable = true;
-      particles.options.interactivity.events.onHover.mode = 'repulse';
-      particles.interactivity.mouse.position = { x: particles.canvas.element.width / 2, y: particles.canvas.element.height * 0.95 };
-    } else {
-      particles.options.interactivity.events.onHover.mode = 'bubble';
-      particles.interactivity.mouse.position = undefined;
-    }
-  }, [isInputActive]);
-
   const styles = `
     /* Main Backdrop & Modal */
     .agent-display-backdrop { position: absolute; top: 0; right: 0; bottom: 0; left: 0; background-color: rgba(248, 250, 252, 0.5); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); display: flex; align-items: center; justify-content: center; z-index: 10; padding: 1rem; }
@@ -243,12 +255,11 @@ export const AgentDisplay = ({ response, onSubmit, isInputActive }: AgentDisplay
     .unknown-component-p-title { font-weight: 700; color: #b91c1c; }
 
     /* --- PRIMITIVE STYLES --- */
-    @keyframes pulse-light { 50% { opacity: 0.7; } }
-
     /* TextInput */
     .text-input-container { text-align: left; }
     .text-input-title { font-weight: 600; color: #1e293b; margin-bottom: 0.75rem; font-size: 1.125rem; }
     .text-input-form { display: flex; gap: 0.5rem; align-items: center; }
+    .text-input-emoji { font-size: 2rem; }
     .text-input-field { flex-grow: 1; background-color: rgba(241, 245, 249, 0.8); border: 1px solid #e2e8f0; color: #334155; border-radius: 0.5rem; padding: 0.75rem 1rem; transition: all 0.2s; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); }
     .text-input-field:focus { outline: 2px solid transparent; outline-offset: 2px; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.3); }
     .text-input-button { padding: 0.75rem 1.25rem; background-image: linear-gradient(to right, #4f46e5, #7c3aed); color: white; border-radius: 0.5rem; font-weight: 600; transition: all 0.2s; border: none; cursor: pointer; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1); }
@@ -256,13 +267,30 @@ export const AgentDisplay = ({ response, onSubmit, isInputActive }: AgentDisplay
     .text-input-button:active { transform: scale(0.95); }
     .text-input-button:disabled { background-image: none; background-color: #d1d5db; cursor: not-allowed; box-shadow: none; }
 
+    /* NumericKeypadInput */
+    .numeric-keypad-container { display: flex; flex-direction: column; align-items: center; gap: 1.25rem; }
+    .numeric-keypad-title { font-weight: 600; font-size: 1.125rem; color: #1e293b; }
+    .numeric-keypad-display { display: flex; gap: 0.75rem; }
+    .pin-dot { width: 1rem; height: 1rem; border-radius: 9999px; background-color: #e2e8f0; transition: all 0.2s ease-in-out; }
+    .pin-dot.filled { background-color: #6366f1; transform: scale(1.1); }
+    .numeric-keypad-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; width: 100%; max-width: 280px; }
+    .keypad-btn { font-size: 1.5rem; font-weight: 500; height: 4rem; border-radius: 1rem; border: none; background-color: rgba(241, 245, 249, 0.7); color: #334155; cursor: pointer; transition: all 0.15s ease-out; }
+    .keypad-btn:hover { background-color: rgba(226, 232, 240, 0.9); }
+    .keypad-btn:active { transform: scale(0.9); background-color: #e0e7ff; }
+    .keypad-btn.action { font-size: 1.25rem; color: #4f46e5; }
+
+    /* *** NEW: STANDALONE BUTTON STYLES *** */
+    .standalone-button { width: 100%; padding: 0.75rem 1rem; background-image: linear-gradient(to right, #3b82f6, #8b5cf6); color: white; border-radius: 0.5rem; font-weight: 600; transition: all 0.2s; border: none; cursor: pointer; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1); }
+    .standalone-button:hover { filter: brightness(1.1); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1); }
+    .standalone-button:active { transform: scale(0.95); }
+
     /* Button Group */
     .button-group-container { display: flex; flex-direction: column; gap: 0.75rem; }
     @media (min-width: 640px) { .button-group-container { flex-direction: row; } }
     .button-group-btn { flex: 1; padding: 0.75rem 1rem; border: 1px solid #cbd5e1; background-color: rgba(255, 255, 255, 0.7); color: #334155; border-radius: 0.5rem; font-weight: 600; cursor: pointer; transition: all 0.2s; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); }
     .button-group-btn:hover { border-color: #6366f1; color: #6366f1; background-color: rgba(238, 242, 255, 0.8); }
 
-    /* ThemedText */
+    /* Other Primitives */
     .themed-text { text-align: left; background: rgba(248, 250, 252, 0.6); padding: 1rem; border-radius: 0.75rem; border: 1px solid rgba(226, 232, 240, 0.8); }
     .themed-text-title { font-weight: 600; color: #1e293b; margin-bottom: 0.25rem; font-size: 1.125rem; }
     .themed-text-p { color: #475569; line-height: 1.625; }
@@ -271,43 +299,18 @@ export const AgentDisplay = ({ response, onSubmit, isInputActive }: AgentDisplay
     .stepper-dots { display: flex; gap: 0.5rem; }
     .stepper-dot { width: 0.625rem; height: 0.625rem; border-radius: 9999px; background-color: #cbd5e1; transition: all 0.3s; }
     .stepper-dot.active { background-color: #6366f1; transform: scale(1.1); }
-    .key-value-display { background: rgba(248, 250, 252, 0.6); padding: 1rem 1.5rem; border-radius: 0.75rem; border: 1px solid rgba(226, 232, 240, 0.8); }
-    .key-value-title { font-size: 1.25rem; font-weight: 700; margin-bottom: 1rem; background-image: linear-gradient(to right, #3b82f6, #8b5cf6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .key-value-display, .data-table-container, .chart-card { background: rgba(248, 250, 252, 0.6); padding: 1rem 1.5rem; border-radius: 0.75rem; border: 1px solid rgba(226, 232, 240, 0.8); }
+    .key-value-title, .data-table-title, .chart-title { font-size: 1.25rem; font-weight: 700; margin-bottom: 1rem; background-image: linear-gradient(to right, #3b82f6, #8b5cf6); -webkit-background-clip: text; background-clip: text; color: transparent; }
     .key-value-dl { display: flex; flex-direction: column; gap: 0.75rem; }
     .key-value-item { display: grid; grid-template-columns: auto 1fr; gap: 1rem; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid #e2e8f0; }
     .key-value-item:last-child { border-bottom: none; }
     .key-value-dt { color: #64748b; font-size: 0.875rem; font-weight: 500; white-space: nowrap; }
     .key-value-dd { color: #1e293b; font-weight: 500; word-break: break-all; }
-    .data-table-container { background: rgba(248, 250, 252, 0.6); padding: 1rem; border-radius: 0.75rem; border: 1px solid rgba(226, 232, 240, 0.8); }
-    .data-table-title { font-size: 1.25rem; font-weight: 700; margin-bottom: 1rem; background-image: linear-gradient(to right, #3b82f6, #8b5cf6); -webkit-background-clip: text; background-clip: text; color: transparent; }
-    .data-table-wrapper { max-height: 300px; overflow-y: auto; }
-    .data-table { width: 100%; border-collapse: collapse; }
-    .data-table th, .data-table td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid #e2e8f0; }
-    .data-table th { font-weight: 600; color: #334155; font-size: 0.875rem; background-color: rgba(241, 245, 249, 0.7); }
-    .data-table td { color: #475569; font-size: 0.875rem; }
-    .data-table tbody tr:last-child td { border-bottom: none; }
-    .confirmation-prompt { background: rgba(248, 250, 252, 0.6); padding: 1.5rem; border-radius: 0.75rem; border: 1px solid rgba(226, 232, 240, 0.8); text-align: center; }
-    .confirmation-title { font-size: 1.25rem; font-weight: 700; color: #1e293b; }
-    .confirmation-text { color: #475569; margin: 0.5rem 0 1.5rem; }
-    .confirmation-buttons { display: flex; gap: 0.75rem; justify-content: center; }
-    .confirmation-btn { padding: 0.6rem 1.25rem; border-radius: 0.5rem; font-weight: 600; border: none; cursor: pointer; transition: all 0.2s; }
-    .confirmation-btn.cancel { background-color: #e2e8f0; color: #475569; }
-    .confirmation-btn.cancel:hover { background-color: #cbd5e1; }
-    .confirmation-btn.confirm { background-image: linear-gradient(to right, #ef4444, #f43f5e); color: white; }
-    .confirmation-btn.confirm:hover { filter: brightness(1.1); }
-    .standalone-button { width: 100%; padding: 0.75rem 1rem; background-image: linear-gradient(to right, #3b82f6, #8b5cf6); color: white; border-radius: 0.5rem; font-weight: 600; transition: all 0.2s; border: none; cursor: pointer; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1); }
-    .standalone-button:hover { filter: brightness(1.1); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1); }
-    .standalone-button:active { transform: scale(0.95); }
     .loading-indicator-container { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; padding: 2rem; }
     .dots-container { display: flex; gap: 0.5rem; }
     .dot { display: block; width: 0.75rem; height: 0.75rem; border-radius: 9999px; }
     .dot-1 { background-color: #60a5fa; } .dot-2 { background-color: #a78bfa; } .dot-3 { background-color: #f472b6; }
-    .loading-text { font-size: 1.125rem; color: #64748b; animation: pulse-light 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-    .chart-card { background: rgba(248, 250, 252, 0.6); padding: 1.5rem; border-radius: 0.75rem; border: 1px solid rgba(226, 232, 240, 0.8); }
-    .chart-title { font-size: 1.25rem; font-weight: 700; margin-bottom: 1rem; background-image: linear-gradient(to right, #3b82f6, #8b5cf6); -webkit-background-clip: text; background-clip: text; color: transparent; }
-    .chart-wrapper { width: 100%; height: 300px; }
-    .unsupported-chart-container { display: flex; align-items: center; justify-content: center; height: 100%; }
-    .unsupported-chart-text { color: #64748b; font-style: italic; }
+    .loading-text { font-size: 1.125rem; color: #64748b; }
   `;
 
   return (

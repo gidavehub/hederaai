@@ -15,7 +15,7 @@ export default class SendNftAgent implements IAgent {
 
     try {
       // 1. Get Required Info from Context
-      const { accountId } = context.collected_info;
+      const { accountId, password } = context.collected_info;
       if (!accountId) {
         throw new Error("accountId is missing from the context.");
       }
@@ -25,6 +25,30 @@ export default class SendNftAgent implements IAgent {
           !context.collected_info.serialNumber || 
           !context.collected_info.recipient) {
         return this.requestNftInfo(context, prompt);
+      }
+
+      // Security check: If password is missing, delegate to SecurityAgent
+      if (!password) {
+        return {
+          status: 'DELEGATING',
+          speech: 'Please enter your password to authorize this NFT transfer.',
+          ui: {
+            type: 'LOADING',
+            props: { text: 'Awaiting password for NFT transfer authorization...' }
+          },
+          action: {
+            type: 'DELEGATE',
+            payload: {
+              agent: 'utility/securityAgent',
+              prompt: 'Request password for NFT transfer authorization.'
+            }
+          },
+          context: {
+            ...context,
+            status: 'delegating',
+            history: [...context.history, 'SendNftAgent delegating to SecurityAgent for password.'],
+          }
+        };
       }
 
       // 2. Execute Primary Function: Sending NFT
